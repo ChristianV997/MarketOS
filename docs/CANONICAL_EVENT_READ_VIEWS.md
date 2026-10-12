@@ -39,9 +39,13 @@ GET-only routes are mounted at `/api/events`, `/api/events/timeline`,
 
 ### Access contract
 
-Every route is operator-only and workspace-bound through
+Every `/api/events` route is operator-only and workspace-bound through
 `backend.identity.http.require_workspace_permission` with
-`canonical_event:read`. Identity comes only from the verified bearer token and
+`canonical_event:read` (shared dependencies in `api/routes/event_access.py`).
+The other routes that read or write canonical event data use the same gate:
+`/api/evaluations*` (bound workspace only), `POST /api/commerce-mvp/public-run`
+(`canonical_event:write`, bound workspace only) and `/api/orchestration/workflows*`
+(operator-only; the workflow log is not workspace-bound). Identity comes only from the verified bearer token and
 the principal's stored membership; the query, headers and body cannot grant
 access.
 
@@ -63,7 +67,12 @@ access.
   Configuration errors keep their short messages. None includes a path,
   payload or secret.
 
-`/api/events/readiness` was open before this change and is now operator-only.
+The readiness routes on these surfaces were open before this change and are now
+operator-only. `/api/orchestration/health` carries no event data and stays open.
+
+Not yet wired: the workflow log is operator-wide rather than bound to a workspace,
+because its records carry a workspace only by convention. Binding it is the
+owner's decision in `backend/orchestration/event_store.py`.
 
 Status: implemented and integration-tested with synthetic principals in
 `tests/integration/test_canonical_events_workspace_authz.py`. Not

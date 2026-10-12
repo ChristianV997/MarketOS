@@ -141,6 +141,10 @@ GET /api/evaluations/readiness
 GET /api/evaluations/compare
 ```
 
+Every evaluation route requires a verified operator principal and evaluates only the
+events of that principal's bound workspace; see
+[Canonical Event Read Views](CANONICAL_EVENT_READ_VIEWS.md#access-contract).
+
 The comparison view additionally requires server-configured baseline and
 current paths beneath `artifacts/`. There are no POST, PUT, PATCH, or DELETE
 evaluation routes. API path configuration is server-side; browser requests

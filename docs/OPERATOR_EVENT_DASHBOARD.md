@@ -18,7 +18,9 @@ key-list-only summary — see
 [Opportunity Scoring](OPPORTUNITY_SCORING.md#dashboard-view). The **Run
 public Commerce MVP test** form has a **Rank candidates with opportunity
 scoring** checkbox that passes `use_opportunity_ranking=true` through to
-`/api/commerce-mvp/public-run`.
+`/api/commerce-mvp/public-run`. That route now requires a verified operator
+session; without a configured identity provider it answers 503, so the form
+cannot run until identity is wired.
 
 The **Competition & pricing** tab shows, per run: observed competitor
 count, median/min/max price, market saturation and maturity, confidence,

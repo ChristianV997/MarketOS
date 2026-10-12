@@ -35,6 +35,12 @@ The server endpoint is `POST /api/commerce-mvp/public-run`. It requires
 the existing server-side credentials and explicit write gate. Browser requests
 cannot supply a URL, file path, credential, cookie, or session.
 
+The route is operator-only. It requires a verified operator principal with
+`canonical_event:write` (see [Canonical Event Read Views](CANONICAL_EVENT_READ_VIEWS.md#access-contract)).
+A body `workspace_id` that names another workspace is refused with 403 before
+any network call or write; an omitted one runs in the operator's bound workspace.
+Without a configured verifier and repository the route answers 503.
+
 The `/operator/events` page contains an acknowledgement-gated “Run public
 Commerce MVP test” form. It states the public GET-only behavior, requires a
 checkbox acknowledgement, and displays blocked/degraded/stale/succeeded
