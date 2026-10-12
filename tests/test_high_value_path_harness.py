@@ -93,9 +93,40 @@ def test_colab_benchmark_matrix_runs_and_emits_synthetic_metrics():
     matrix = harness.run_colab_benchmark_matrix(runs=2)
     assert matrix["schema"] == "MarketOS.ColabBenchmarkMatrix.v1"
     assert matrix["zero_secrets"] is True
+    assert matrix["offline_credential_free"] is True
     assert matrix["zero_network_calls"] is True
     assert matrix["all_deterministic"] is True
     assert len(matrix["matrix"]) >= 7
     for row in matrix["matrix"]:
         assert row["deterministic_bit_identity"] is True
         assert row["avg_ms"] >= 0.0
+
+
+def test_colab_benchmark_matrix_cli_emits_safe_bounded_diagnostics(capsys):
+    ret = harness.main(["--colab-matrix", "--runs", "1"])
+    assert ret == 0
+    out = capsys.readouterr().out
+    assert "Colab Benchmark Matrix" in out
+    assert "Offline credential-free: verified" in out
+    assert "Deterministic: all_deterministic" in out
+    assert "Zero secrets:" not in out
+
+
+def test_colab_benchmark_matrix_cli_never_leaks_injected_canaries(monkeypatch, capsys):
+    canary = "sk-live-synthetic-benchmark-canary-99999"
+    monkeypatch.setenv("MARKETOS_SYNTHETIC_CANARY_TOKEN", canary)
+    monkeypatch.setenv("POSTGRES_PASSWORD", canary)
+
+    ret = harness.main(["--colab-matrix", "--runs", "1"])
+    assert ret == 0
+    text_out = capsys.readouterr().out
+    assert canary not in text_out
+
+    ret = harness.main(["--colab-matrix", "--runs", "1", "--json"])
+    assert ret == 0
+    json_out = capsys.readouterr().out
+    assert canary not in json_out
+    parsed = json.loads(json_out)
+    assert parsed["schema"] == "MarketOS.ColabBenchmarkMatrix.v1"
+    assert parsed["zero_secrets"] is True
+    assert parsed["offline_credential_free"] is True

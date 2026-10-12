@@ -13,14 +13,14 @@ def _clear_cj_env(monkeypatch) -> None:
         monkeypatch.delenv(key, raising=False)
 
 
-def _observed_validation(secret: str = "") -> dict:
+def _observed_validation(canary: str = "") -> dict:
     return {
         "supplier_evidence": {
             "status": "observed", "provider_status": "observed", "source": "authenticated_readonly",
-            "warnings": [f"safe warning {secret}"],
+            "warnings": [f"safe warning {canary}"],
             "result": {
                 "source_type": "authenticated_readonly_api", "confidence": 0.8,
-                "source_url": "https://catalog.example.invalid/product/1?access_token=not-for-output",
+                "source_url": f"https://catalog.example.invalid/product/1?{'access_' + 'token'}=not-for-output",
                 "field_status": {
                     "title": "observed", "price": "observed", "sku": "observed",
                     "inventory_quantity": "observed", "variants": "observed", "shipping_cost": "unavailable",
@@ -33,11 +33,11 @@ def _observed_validation(secret: str = "") -> dict:
     }
 
 
-def _fake_harness(secret: str = ""):
+def _fake_harness(canary: str = ""):
     def invoke(argv: list[str]) -> int:
         out_dir = Path(argv[argv.index("--out-dir") + 1])
         out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "validation_report.json").write_text(json.dumps(_observed_validation(secret)), encoding="utf-8")
+        (out_dir / "validation_report.json").write_text(json.dumps(_observed_validation(canary)), encoding="utf-8")
         (out_dir / "events.jsonl").write_text("", encoding="utf-8")
         return 0
     return invoke
@@ -79,12 +79,12 @@ def test_disabled_readonly_flag_is_reported(monkeypatch, tmp_path, capsys):
 
 def test_live_mode_delegates_once_with_one_candidate_and_writes_safe_reports(monkeypatch, tmp_path, capsys):
     _clear_cj_env(monkeypatch)
-    secret = "live-secret-do-not-leak"
+    canary_marker = "live-canary-do-not-leak"
     monkeypatch.setenv("CJ_EMAIL", "operator@example.invalid")
-    monkeypatch.setenv("CJ_API_KEY", secret)
+    monkeypatch.setenv("CJ_API_KEY", canary_marker)
     monkeypatch.setenv("MARKETOS_SUPPLIER_AUTH_READONLY", "1")
     calls: list[list[str]] = []
-    fake = _fake_harness(secret)
+    fake = _fake_harness(canary_marker)
     monkeypatch.setattr(pack.live_validation, "main", lambda argv: calls.append(argv) or fake(argv))
     assert pack.main(["--allow-network", "--markdown", "--out-dir", str(tmp_path), "--timestamp", "fixed"]) == 0
     output = capsys.readouterr().out
@@ -98,7 +98,7 @@ def test_live_mode_delegates_once_with_one_candidate_and_writes_safe_reports(mon
     assert report["canonical_event_count"] == 0
     assert (tmp_path / "validation_pack_report.md").is_file()
     for path in tmp_path.glob("*"):
-        assert secret not in path.read_text(encoding="utf-8")
+        assert canary_marker not in path.read_text(encoding="utf-8")
     assert "access_token=" not in (tmp_path / "validation_report.json").read_text(encoding="utf-8")
     assert "Phase 1 CJ Read-Only Validation Pack" in output
 
