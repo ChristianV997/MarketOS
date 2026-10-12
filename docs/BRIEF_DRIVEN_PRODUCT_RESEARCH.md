@@ -13,7 +13,7 @@ manual competitor URLs, supplier CSVs, or hand-entered observations.
 | `target_region` | yes | Target market / region |
 | `language` | yes | Language / locale for attention framing |
 | `intended_buyer` | yes | Buyer persona the offer is for |
-| `max_candidates` | no | Bound (1–25, default 5) |
+| `max_candidates` | no | Bound unique `candidate_id`s kept per pillar after collection (1–25, default 5) |
 | `evidence_mode` | no | `fixture_demo` (default) or `manual_import` |
 | `workspace_id` | no | Optional workspace label for governor simulation |
 

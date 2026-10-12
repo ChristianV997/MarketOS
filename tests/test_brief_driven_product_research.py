@@ -126,6 +126,108 @@ def test_happy_path_brief_to_synthesis_with_fake_clients():
     assert payload["authority"]["provider_pull_authorized"] is False
 
 
+def test_max_candidates_bounds_unique_candidate_ids():
+    brief = _brief(max_candidates=1)
+    market_rows = (
+        {
+            "candidate_id": "alpha-maker",
+            "query": "alpha",
+            "marketplace": "amazon",
+            "source_type": "amazon_best_sellers_snapshot",
+            "price": 40.0,
+            "currency": "USD",
+            "review_count": 10,
+            "rating": 4.0,
+            "field_provenance": {"price": "fixture"},
+        },
+        {
+            "candidate_id": "beta-maker",
+            "query": "beta",
+            "marketplace": "amazon",
+            "source_type": "amazon_best_sellers_snapshot",
+            "price": 55.0,
+            "currency": "USD",
+            "review_count": 20,
+            "rating": 4.2,
+            "field_provenance": {"price": "fixture"},
+        },
+    )
+    supplier_rows = (
+        {
+            "candidate_id": "alpha-maker",
+            "query": "alpha",
+            "supplier": "cj",
+            "source_type": "fixture_demo",
+            "unit_cost": 10.0,
+            "currency": "USD",
+            "shipping_cost": 2.0,
+            "shipping_currency": "USD",
+            "inventory_quantity": 50,
+            "inventory_status": "in_stock",
+            "destination_region": "US",
+            "field_provenance": {"unit_cost": "fixture"},
+        },
+        {
+            "candidate_id": "beta-maker",
+            "query": "beta",
+            "supplier": "cj",
+            "source_type": "fixture_demo",
+            "unit_cost": 14.0,
+            "currency": "USD",
+            "shipping_cost": 3.0,
+            "shipping_currency": "USD",
+            "inventory_quantity": 40,
+            "inventory_status": "in_stock",
+            "destination_region": "US",
+            "field_provenance": {"unit_cost": "fixture"},
+        },
+    )
+    attention_rows = (
+        {
+            "candidate_id": "alpha-maker",
+            "query": "alpha",
+            "source": "fixture",
+            "source_type": "tiktok_creative_center_snapshot",
+            "platform": "tiktok",
+            "hook": "A",
+            "angle": "a",
+            "pain_point": "a",
+            "view_count": 1000,
+            "like_count": 10,
+            "geography": "US",
+            "language": "en",
+        },
+        {
+            "candidate_id": "beta-maker",
+            "query": "beta",
+            "source": "fixture",
+            "source_type": "tiktok_creative_center_snapshot",
+            "platform": "tiktok",
+            "hook": "B",
+            "angle": "b",
+            "pain_point": "b",
+            "view_count": 2000,
+            "like_count": 20,
+            "geography": "US",
+            "language": "en",
+        },
+    )
+    report = run_brief_driven_research(
+        brief,
+        marketplace_client=FakeMarketplaceClient(rows=market_rows),
+        supplier_client=FakeSupplierClient(rows=supplier_rows),
+        attention_client=FakeAttentionClient(rows=attention_rows),
+    )
+    for pillar in ("marketplace", "supplier", "consumer_attention"):
+        outcome = report.source_outcomes[pillar]
+        assert outcome.record_count == 1
+        assert "max_candidates_bound" in outcome.provenance
+        assert "records_truncated_to_max_candidates" in outcome.warnings
+        candidates = (outcome.report or {}).get("candidates") or []
+        assert len(candidates) == 1
+        assert candidates[0]["candidate_id"] == "alpha-maker"
+
+
 def test_partial_failure_preserves_successful_sources():
     brief = _brief()
     market, supplier, _ = _success_clients(brief)

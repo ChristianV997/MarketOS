@@ -528,12 +528,28 @@ def _compatible_reference_prices(
     return prices, ("target_sell_prices_same_currency_only:" + next(iter(market_currencies)),)
 
 
+def _bound_records_by_candidate(records: tuple[Any, ...], max_candidates: int) -> tuple[Any, ...]:
+    """Keep records for the first ``max_candidates`` distinct candidate_ids (stable order)."""
+    selected_ids: list[str] = []
+    for item in records:
+        candidate_id = str(getattr(item, "candidate_id", "") or "")
+        if not candidate_id:
+            continue
+        if candidate_id not in selected_ids:
+            if len(selected_ids) >= max_candidates:
+                continue
+            selected_ids.append(candidate_id)
+    allowed = set(selected_ids)
+    return tuple(item for item in records if str(getattr(item, "candidate_id", "") or "") in allowed)
+
+
 def _build_pillar_outcome(
     pillar: str,
     query: str,
     collected: SourceCollectResult,
     *,
     evidence_mode: str,
+    max_candidates: int,
     marketplace_report_for_prices: Mapping[str, Any] | None = None,
 ) -> SourceOutcome:
     if collected.status not in {"collected", "partial"} or not collected.records:
@@ -553,35 +569,51 @@ def _build_pillar_outcome(
             currencies=collected.currencies,
         )
 
+    bounded = _bound_records_by_candidate(collected.records, max_candidates)
+    bound_assumptions: tuple[str, ...] = ()
+    bound_warnings: tuple[str, ...] = ()
+    if len(bounded) < len(collected.records):
+        bound_assumptions = (f"max_candidates_applied:{max_candidates}",)
+        bound_warnings = ("records_truncated_to_max_candidates",)
+    currencies = tuple(
+        dict.fromkeys(
+            str(getattr(item, "currency", "") or "").upper()
+            for item in bounded
+            if getattr(item, "currency", None)
+        )
+    ) or collected.currencies
+
     extra_assumptions: tuple[str, ...] = ()
     if pillar == "marketplace":
-        report = build_marketplace_report(list(collected.records), evidence_mode=evidence_mode).to_dict()
+        report = build_marketplace_report(list(bounded), evidence_mode=evidence_mode).to_dict()
     elif pillar == "supplier":
         reference_prices, price_notes = _compatible_reference_prices(
             marketplace_report_for_prices,
-            supplier_currencies=collected.currencies,
+            supplier_currencies=currencies,
         )
         extra_assumptions = price_notes
         report = build_supplier_report(
-            list(collected.records),
+            list(bounded),
             evidence_mode=evidence_mode,
             target_sell_prices=reference_prices,
         ).to_dict()
     else:
-        report = build_attention_report(list(collected.records), evidence_mode=evidence_mode).to_dict()
+        report = build_attention_report(list(bounded), evidence_mode=evidence_mode).to_dict()
 
     return SourceOutcome(
         pillar=pillar,
         status=collected.status,
         evidence_mode=str(report.get("evidence_mode") or evidence_mode),
         query=query,
-        record_count=len(collected.records),
+        record_count=len(bounded),
         report=report,
-        provenance=collected.provenance + (f"{pillar}_build_report",),
+        provenance=collected.provenance + (f"{pillar}_build_report", "max_candidates_bound"),
         freshness_label=collected.freshness_label,
-        warnings=collected.warnings + tuple(str(item) for item in report.get("warnings", []) if isinstance(item, str)),
-        assumptions=collected.assumptions + extra_assumptions,
-        currencies=collected.currencies,
+        warnings=collected.warnings
+        + bound_warnings
+        + tuple(str(item) for item in report.get("warnings", []) if isinstance(item, str)),
+        assumptions=collected.assumptions + bound_assumptions + extra_assumptions,
+        currencies=currencies,
     )
 
 
@@ -713,6 +745,7 @@ def run_brief_driven_research(
         queries.marketplace_query,
         collected["marketplace"],
         evidence_mode=brief.evidence_mode,
+        max_candidates=brief.max_candidates,
     )
     outcomes["marketplace"] = market_outcome
     outcomes["supplier"] = _build_pillar_outcome(
@@ -720,6 +753,7 @@ def run_brief_driven_research(
         queries.supplier_query,
         collected["supplier"],
         evidence_mode=brief.evidence_mode,
+        max_candidates=brief.max_candidates,
         marketplace_report_for_prices=market_outcome.report,
     )
     outcomes["consumer_attention"] = _build_pillar_outcome(
@@ -727,6 +761,7 @@ def run_brief_driven_research(
         queries.attention_query,
         collected["consumer_attention"],
         evidence_mode=brief.evidence_mode,
+        max_candidates=brief.max_candidates,
     )
 
     synthesis = build_product_opportunity_synthesis(
