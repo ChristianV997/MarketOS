@@ -28,6 +28,8 @@ MAX_POLICY_BYTES = 16_384
 MAX_DEPTH = 8
 MAX_LIST_ITEMS = 16
 MAX_PATH_CHARS = 240
+MAX_REPORTED_ERRORS = 64
+MAX_REPORTED_PATHS = 8
 ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _DRIVE = re.compile(r"[A-Za-z]:")
@@ -324,22 +326,38 @@ def _overlap_code(left_kind: str, right_kind: str) -> str:
 
 
 def _check_overlaps(records: list[dict[str, Any]], findings: list[dict[str, Any]]) -> None:
-    """Compare write scopes across different agents. Same-agent pairs are duplicate-assignment findings."""
+    """Compare write scopes across different agents. Same-agent pairs are duplicate-assignment findings.
+
+    One finding per agent pair and overlap code, so a shared scope cannot inflate the report. ``overlap_count``
+    keeps the number of overlapping path combinations, and ``paths`` lists at most MAX_REPORTED_PATHS of them.
+    """
     for left_index, left in enumerate(records):
         for right in records[left_index + 1 :]:
             if left["agent"] and left["agent"] == right["agent"]:
                 continue
             agents = sorted(agent for agent in (left["agent"], right["agent"]) if agent)
             location = f"{left['location']} / {right['location']}"
+            grouped: dict[str, dict[str, Any]] = {}
             for left_kind in ("primary", "fallback"):
                 for right_kind in ("primary", "fallback"):
+                    code = _overlap_code(left_kind, right_kind)
                     for left_path in left[left_kind]:
                         for right_path in right[right_kind]:
                             if _overlaps(left_path, right_path):
-                                code = _overlap_code(left_kind, right_kind)
-                                findings.append(
-                                    _finding(code, location, agents=agents, paths=sorted({left_path, right_path}))
-                                )
+                                bucket = grouped.setdefault(code, {"paths": set(), "count": 0})
+                                bucket["paths"].update((left_path, right_path))
+                                bucket["count"] += 1
+            for code in sorted(grouped):
+                bucket = grouped[code]
+                findings.append(
+                    _finding(
+                        code,
+                        location,
+                        agents=agents,
+                        paths=sorted(bucket["paths"])[:MAX_REPORTED_PATHS],
+                        overlap_count=bucket["count"],
+                    )
+                )
 
 
 def _cycle_members(tasks: list[str], edges: dict[str, list[str]]) -> list[str]:
@@ -397,16 +415,18 @@ def _report(
     policy_id: str | None, findings: list[dict[str, Any]], session_id: str | None, checked: int
 ) -> dict[str, Any]:
     unique = {json.dumps(item, sort_keys=True): item for item in findings}
-    errors = sorted(
+    ordered = sorted(
         unique.values(), key=lambda item: (item["code"], item["location"], json.dumps(item, sort_keys=True))
     )
+    # error_count and valid always describe the full set; only the listed errors are capped.
     return {
         "schema": REPORT_SCHEMA,
         "policy_id": policy_id,
         "read_only": True,
-        "valid": not errors,
-        "error_count": len(errors),
-        "errors": errors,
+        "valid": not ordered,
+        "error_count": len(ordered),
+        "truncated": len(ordered) > MAX_REPORTED_ERRORS,
+        "errors": ordered[:MAX_REPORTED_ERRORS],
         "session_id": session_id,
         "assignments_checked": checked,
     }

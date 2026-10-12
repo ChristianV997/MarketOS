@@ -19,6 +19,12 @@ python scripts/ai/validate_agent_batch_plan.py docs/ai/agent_batch_plan.sample.j
 - Exit `2`: the plan is invalid, unreadable, or the policy failed to load.
 - Output is a sorted JSON report on stdout. It never echoes the input path or raw
   values. Invalid values are reported by location and code only.
+- `valid` is true only when there are no findings. `error_count` counts every finding.
+  `errors` lists at most 64 of them, and `truncated` says whether the list was cut.
+- Overlap findings are one per agent pair and overlap code. Each carries `overlap_count`
+  (the number of overlapping path combinations) and at most 8 `paths`.
+- There is no dispatcher in this repository. The CLI exit code is the only gate: a plan
+  is validated, never executed, and anything that is not valid must not be dispatched.
 
 Options: `--policy PATH` replaces the default roster policy.
 
