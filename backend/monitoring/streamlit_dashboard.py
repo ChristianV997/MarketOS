@@ -64,23 +64,29 @@ def confine_state_path(raw_path: str | os.PathLike[str], *, root: Path | str | N
 
     root_path = _get_dashboard_root(root)
     root_s = os.path.realpath(str(root_path))
+    root_prefix = root_s if root_s.endswith(os.sep) else root_s + os.sep
 
-    # Construct candidate path relative to root if not already absolute
-    candidate = p if p.is_absolute() else Path(root_s) / p
+    # Combine path with root and normalize
+    if p.is_absolute():
+        joined = str(p)
+    else:
+        joined = os.path.join(root_s, normalized_str)
 
     try:
-        resolved = candidate.resolve()
-        resolved_s = os.path.realpath(str(resolved))
+        normalized_joined = os.path.normpath(joined)
+        resolved_s = os.path.realpath(normalized_joined)
     except (OSError, ValueError):
         raise ValueError("state_path_invalid") from None
 
-    # Path boundary checks: commonpath + is_relative_to (immune to sibling-prefix bypasses)
+    # CodeQL-recognized path boundary barrier guard
+    if not resolved_s.startswith(root_prefix):
+        raise ValueError("state_path_outside_root")
+
+    # Defense-in-depth: commonpath and relative_to checks
     try:
         if os.path.commonpath([root_s, resolved_s]) != root_s:
             raise ValueError("state_path_outside_root")
-        if not resolved.is_relative_to(root_path):
-            raise ValueError("state_path_outside_root")
-        rel = resolved.relative_to(root_path)
+        rel = Path(resolved_s).relative_to(root_s)
     except (ValueError, OSError):
         raise ValueError("state_path_outside_root") from None
 
@@ -99,14 +105,21 @@ def _is_safe_regular_file(path: Path | str, *, root: Path | str | None = None) -
     """
     try:
         root_path = _get_dashboard_root(root)
-        p = Path(path).resolve()
-        if not p.is_relative_to(root_path):
+        root_s = os.path.realpath(str(root_path))
+        root_prefix = root_s if root_s.endswith(os.sep) else root_s + os.sep
+
+        resolved_s = os.path.realpath(str(path))
+        # CodeQL-recognized path barrier guard
+        if not resolved_s.startswith(root_prefix):
             return False
+
+        p = Path(resolved_s)
         if not p.is_file():
             return False
+
         flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(str(p), flags)
+        fd = os.open(resolved_s, flags)
         try:
             st_stat = os.fstat(fd)
             return stat.S_ISREG(st_stat.st_mode)
