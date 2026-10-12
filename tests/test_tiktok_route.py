@@ -158,6 +158,9 @@ def test_dry_run_check_is_explicit_and_does_not_call_provider(client, monkeypatc
 
     monkeypatch.setattr(tiktok_ads, "_DRY_RUN", True)
     monkeypatch.setattr(tiktok_ads, "_roas_streaks", {})
+    monkeypatch.setattr(tiktok_ads, "_KILL_SPEND_RATIO", 1.2)
+    monkeypatch.setattr(tiktok_ads, "_KILL_ROAS_FLOOR", 0.8)
+    monkeypatch.setenv("TIKTOK_ADVERTISER_ID", "")
     post_calls = []
     original_post = tiktok_ads._post
 
