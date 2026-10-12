@@ -22,6 +22,7 @@ from evaluation.commerce.fulfillment_exception_report import (
 )
 from evaluation.commerce.fulfillment_risk_lifecycle import (
     FixtureFulfillmentAdapter,
+    _TRANSITIONS,
     build_named_scenario,
     run_fulfillment_risk_dry_run,
 )
@@ -108,6 +109,8 @@ def test_failed_delivery_fixture_does_not_authorize_a_refund():
     _assert_no_action(document)
     assert document["attention_required"] is True
     assert document["delivery_risk"]["failed_delivery"] is True
+    assert document["transition_review"]["valid"] is True
+    assert "failed_delivery" in _TRANSITIONS["delayed"]
     assert document["next_safe_review_step"] == "read_failed_delivery_record_only"
     assert "refund_requested" in document["transition_review"]["lifecycle_allowed_next"]
     assert document["transition_review"]["lifecycle_allowed_next_are_not_actions"] is True
@@ -139,10 +142,12 @@ def test_illegal_edges_are_explained_and_not_advanced():
         reviewed_at=REVIEWED,
     )
     assert direct["transition_review"]["valid"] is False
-    assert any(
-        edge["from"] == "replacement_shipped" and edge["to"] == "failed_delivery"
-        for edge in direct["transition_review"]["invalid_edges"]
+    replacement_edge = next(
+        edge for edge in direct["transition_review"]["invalid_edges"]
+        if edge["from"] == "replacement_shipped" and edge["to"] == "failed_delivery"
     )
+    assert "failed_delivery" not in _TRANSITIONS["replacement_shipped"]
+    assert replacement_edge["lifecycle_allowed_next"] == sorted(_TRANSITIONS["replacement_shipped"])
     assert direct["next_safe_review_step"] == "stop_and_review_recorded_path_do_not_advance"
 
     closed = review_proposed_path(
@@ -162,8 +167,21 @@ def test_return_delay_and_early_chargeback_stay_review_only():
     )
     # refund_requested is a legal edge from cancelled, but path-only still must not refund.
     assert delay["transition_review"]["valid"] is True
+    assert delay["evidence"]["basis"] == "not_evaluated"
     assert delay["next_safe_review_step"] == "read_refund_or_chargeback_state_do_not_initiate"
     assert delay["attention_required"] is True
+
+    quiet = review_proposed_path(
+        ("order_received", "payment_authorized", "payment_captured"),
+        order_id="order-path-only",
+        reviewed_at=REVIEWED,
+    )
+    assert quiet["transition_review"]["valid"] is True
+    assert quiet["evidence"] == {"basis": "not_evaluated", "freshness": "not_evaluated", "states": []}
+    assert quiet["lifecycle_status"] == "not_run"
+    assert quiet["attention_required"] is True
+    assert quiet["next_safe_review_step"] == "collect_sanitized_evidence_before_any_decision"
+    assert quiet["reserve_classifications"] == []
 
     base = build_named_scenario("shipment_delayed")
     returned = replace(
@@ -178,6 +196,13 @@ def test_return_delay_and_early_chargeback_stay_review_only():
     )
     document = review_scenario(returned, reviewed_at=REVIEWED, adapter=FixtureFulfillmentAdapter.complete())
     _assert_no_action(document)
+    return_edge = next(
+        step for step in document["transition_review"]["steps"]
+        if step["from"] == "return_in_transit" and step["to"] == "delayed"
+    )
+    assert "delayed" in _TRANSITIONS["return_in_transit"]
+    assert return_edge["valid"] is True
+    assert document["transition_review"]["valid"] is True
     assert document["delivery_risk"]["delayed"] is True
     assert document["next_safe_review_step"] == "read_delay_evidence_only"
 
@@ -188,6 +213,15 @@ def test_return_delay_and_early_chargeback_stay_review_only():
         state_path=("order_received", "payment_authorized", "chargeback_opened"),
     )
     chargeback = review_scenario(early, reviewed_at=REVIEWED, adapter=FixtureFulfillmentAdapter.complete())
+    capture_edge = next(
+        step for step in chargeback["transition_review"]["steps"]
+        if step["from"] == "payment_authorized" and step["to"] == "chargeback_opened"
+    )
+    assert "chargeback_opened" in _TRANSITIONS["payment_authorized"]
+    assert "payment_captured" not in early.state_path
+    assert capture_edge["valid"] is True
+    assert chargeback["transition_review"]["valid"] is True
+    assert chargeback["transition_review"]["current_state"] == "chargeback_opened"
     assert chargeback["next_safe_review_step"] == "read_refund_or_chargeback_state_do_not_initiate"
     assert chargeback["mutations"]["refunds"] is False
 
