@@ -245,8 +245,8 @@ def compare_field_observations(
     This is the strict successor path for report consumers. Monetary values are
     parsed through the canonical ``Money`` contract and are never subtracted
     unless both currency and unit metadata agree and every observation is
-    current. The existing ``detect_field_conflicts`` function remains a
-    compatibility wrapper for legacy dimensionless numeric callers.
+    current. The existing ``detect_field_conflicts`` function remains the
+    legacy dimensionless float path for callers that have not migrated.
     """
     try:
         decimal_tolerance = tolerance if isinstance(tolerance, Decimal) else Decimal(str(tolerance))
@@ -290,6 +290,17 @@ def compare_field_observations(
         if "currency-missing" in parse_errors:
             results.append(_finding(candidate_id, field, items, status="currency-missing", note="every monetary observation needs a valid explicit currency"))
             continue
+        if "stale" in parse_errors:
+            results.append(
+                _finding(
+                    candidate_id,
+                    field,
+                    items,
+                    status="insufficient-evidence",
+                    note="stale, rejected, unknown, or missing typed Money evidence_state cannot support comparison",
+                )
+            )
+            continue
         if len(parsed) < 2 or "invalid" in parse_errors:
             results.append(_finding(candidate_id, field, items, status="insufficient-evidence", note="numeric comparison requires two finite supplied values"))
             continue
@@ -302,6 +313,17 @@ def compare_field_observations(
         units = {value.unit for _, value in parsed}
         if len(units) > 1:
             results.append(_finding(candidate_id, field, items, status="unit-mismatch", note="observations must use one explicit unit before comparison"))
+            continue
+        if "unknown" in units or "" in units:
+            results.append(
+                _finding(
+                    candidate_id,
+                    field,
+                    items,
+                    status="insufficient-evidence",
+                    note="unknown or empty unit cannot support comparison",
+                )
+            )
             continue
         if _is_money_field(field) and None in units:
             results.append(_finding(candidate_id, field, items, status="insufficient-evidence", note="monetary comparison requires an explicit unit"))

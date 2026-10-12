@@ -187,6 +187,29 @@ def test_stale_typed_money_is_not_rehabilitated_by_fresh_provenance():
     assert result.delta is None
 
 
+def test_stale_typed_money_fails_closed_even_when_other_values_remain():
+    """Stale Money must not be dropped so remaining values can still reconcile."""
+    stale = Money("10.00", "USD", source="manual", provenance="supplier-a", evidence_state="stale")
+    result = _status(
+        FieldObservation("shipping_cost", stale, _provenance("supplier-a"), unit="shipment"),
+        _observation("12", "supplier-b"),
+        _observation("12", "supplier-c"),
+    )
+
+    assert result.status == "insufficient-evidence"
+    assert result.delta is None
+
+
+def test_unknown_unit_is_insufficient_evidence_not_comparable():
+    result = _status(
+        _observation("10", "supplier-a", unit="unknown"),
+        _observation("10", "supplier-b", unit="unknown"),
+    )
+
+    assert result.status == "insufficient-evidence"
+    assert result.delta is None
+
+
 def test_conflicting_typed_money_metadata_fails_closed():
     value = Money("10.00", "USD", source="manual", provenance="supplier-a", evidence_state="observed")
     result = _status(
