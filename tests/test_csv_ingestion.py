@@ -115,6 +115,9 @@ def test_generic_import_marks_overflowing_metadata_number_invalid():
 
 
 def test_generic_import_marks_deeply_nested_metadata_invalid_without_dropping_value():
+    from backend.discovery.csv_ingestion import MAX_METADATA_NESTING_DEPTH
+
+    depth = MAX_METADATA_NESTING_DEPTH + 1
     records = PARSERS["generic_market_csv"](
         [
             {
@@ -122,7 +125,7 @@ def test_generic_import_marks_deeply_nested_metadata_invalid_without_dropping_va
                 "entity_name": "Synthetic category",
                 "signal_type": "demand_proxy",
                 "value": "3",
-                "metadata_json": "[" * 5000 + "0" + "]" * 5000,
+                "metadata_json": '{"nested":' * depth + "0" + "}" * depth,
             }
         ],
         {"source_name": "synthetic_manual_import", "evidence_class": "manual"},

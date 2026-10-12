@@ -9,6 +9,7 @@ from typing import Any, Callable
 from .evidence_source_contract import EvidenceRecord
 
 MAX_ROWS = 10_000
+MAX_METADATA_NESTING_DEPTH = 32
 SUPPORTED_PARSERS = {"google_trends_csv", "tiktok_creative_center_csv", "amazon_bestsellers_csv", "meta_ad_library_csv", "reddit_keyword_csv", "mercadolibre_snapshot_csv", "supplier_catalog_csv", "shopify_orders_csv", "stripe_payments_csv", "generic_market_csv", "local_json_dataset"}
 KNOWN_SIGNALS = {"trend_proxy", "demand_proxy", "competition_proxy", "margin_proxy", "audience_proxy", "creative_proxy", "pain_point", "price_signal", "supplier_proxy", "risk_proxy", "own_store_sales_proxy", "rank_proxy"}
 
@@ -68,6 +69,19 @@ def _parse_finite_json_number(value: str) -> float:
     if not math.isfinite(numeric):
         raise ValueError("non_finite_json_number")
     return numeric
+
+
+def _metadata_exceeds_nesting_depth(value: Any, max_depth: int = MAX_METADATA_NESTING_DEPTH) -> bool:
+    stack: list[tuple[Any, int]] = [(value, 0)]
+    while stack:
+        current, depth = stack.pop()
+        if depth > max_depth:
+            return True
+        if isinstance(current, dict):
+            stack.extend((item, depth + 1) for item in current.values())
+        elif isinstance(current, list):
+            stack.extend((item, depth + 1) for item in current)
+    return False
 
 
 def _record(row: dict[str, str], index: int, parser: str, provenance: dict[str, Any], entity_type: str, entity_name: str, signal: str, value: Any, metadata: dict[str, Any] | None = None) -> EvidenceRecord | None:
@@ -182,11 +196,13 @@ def parse_generic_market_csv(rows, provenance):
                     parse_constant=_reject_non_finite_json_constant,
                     parse_float=_parse_finite_json_number,
                 )
-                metadata = (
-                    parsed_metadata
-                    if isinstance(parsed_metadata, dict)
-                    else {"metadata_json_invalid": True}
-                )
+                if (
+                    not isinstance(parsed_metadata, dict)
+                    or _metadata_exceeds_nesting_depth(parsed_metadata)
+                ):
+                    metadata = {"metadata_json_invalid": True}
+                else:
+                    metadata = parsed_metadata
             except (json.JSONDecodeError, ValueError, RecursionError):
                 metadata = {"metadata_json_invalid": True}
         return [(_text(r, "entity_type") or "category", signal, value, metadata)]
