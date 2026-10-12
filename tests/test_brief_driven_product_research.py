@@ -147,7 +147,6 @@ def test_partial_failure_preserves_successful_sources():
     # Missing attention must not drop the 25% weight (would inflate marketplace/supplier).
     top = (report.synthesis or {}).get("candidates") or []
     if top:
-        weights = top[0].get("score", {}).get("score_breakdown") or top[0].get("score", {})
         # combined uses consumer weight; raw consumer component stays at zero
         assert float(top[0]["score"].get("consumer_attention", 0)) == 0.0
 
