@@ -4,13 +4,27 @@ Synthetic fixtures only — no credentials, providers, network, or live upgrades
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from evaluation.commerce.product_identity_resolution import (
     MATCH_STATES,
     ProductObservation,
     resolve_product_identity,
+    to_opportunity_synthesis_handoff,
 )
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "product_identity_resolution"
+
+
+def _load_fixture(name: str) -> dict:
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def _observations_from_fixture(payload: dict) -> list[ProductObservation]:
+    return [ProductObservation(**row) for row in payload["observations"]]
 
 
 def _obs(**overrides: object) -> ProductObservation:
@@ -396,3 +410,161 @@ def test_consumer_attention_not_treated_as_supplier_or_price_proof():
     assert "live" not in by_id["ca-1"].evidence_mode
     assert report.pillar_separation["consumer_attention_is_not_supplier_proof"] is True
     assert report.pillar_separation["consumer_attention_is_not_marketplace_price_proof"] is True
+    assert report.pillar_separation["product_identity_is_not_attention_evidence"] is True
+    assert report.pillar_separation["product_identity_is_not_marketplace_price_proof"] is True
+    assert report.pillar_separation["product_identity_is_not_supplier_proof"] is True
+
+
+def test_adversarial_compatible_variants_fixture_exact_match():
+    payload = _load_fixture("compatible_variants.json")
+    report = resolve_product_identity(_observations_from_fixture(payload))
+    keys = {link.candidate_key for link in report.links}
+    states = {link.match_state for link in report.links}
+    assert len(keys) == 1
+    assert states == {"exact_match"}
+    assert "exact_match" not in set(payload["expect"]["forbidden_states"])
+
+
+def test_adversarial_candidate_hint_cannot_override_conflicting_variants():
+    payload = _load_fixture("conflicting_variants_same_candidate_hint.json")
+    report = resolve_product_identity(_observations_from_fixture(payload))
+    keys = {link.candidate_key for link in report.links}
+    states = {link.match_state for link in report.links}
+    assert len(keys) == 2
+    assert "exact_match" not in states
+    assert states == {"conflict"}
+    for link in report.links:
+        for reason in payload["expect"]["required_conflict_reasons"]:
+            assert reason in link.conflict_reasons
+    assert "candidate_id_hint_is_never_exact_match_basis" in report.warnings
+
+
+def test_adversarial_missing_identifiers_never_exact():
+    payload = _load_fixture("missing_identifiers.json")
+    report = resolve_product_identity(_observations_from_fixture(payload))
+    states = {link.match_state for link in report.links}
+    assert "exact_match" not in states
+    assert states <= set(payload["expect"]["allowed_states"])
+    assert len({link.candidate_key for link in report.links}) == 2
+
+
+def test_adversarial_conflicting_source_records_block_collapse():
+    payload = _load_fixture("conflicting_source_records.json")
+    report = resolve_product_identity(_observations_from_fixture(payload))
+    assert len({link.candidate_key for link in report.links}) == 2
+    assert all(link.match_state == "conflict" for link in report.links)
+    assert all(link.match_state != "exact_match" for link in report.links)
+    for link in report.links:
+        for reason in payload["expect"]["required_conflict_reasons"]:
+            assert reason in link.conflict_reasons
+
+
+def test_gtin_match_with_conflicting_pack_is_not_exact():
+    a = _obs(
+        observation_id="gp1",
+        gtin="012345678905",
+        pack_size="2",
+        candidate_id_hint="same-cand",
+        title="Acme Widget 2-pack",
+    )
+    b = _obs(
+        observation_id="gp2",
+        source_record_id="listing-2",
+        gtin="012345678905",
+        pack_size="6",
+        candidate_id_hint="same-cand",
+        title="Acme Widget 6-pack",
+    )
+    report = resolve_product_identity([a, b])
+    assert len({link.candidate_key for link in report.links}) == 2
+    assert all(link.match_state != "exact_match" for link in report.links)
+    assert any("variant_or_pack_size_conflict" in link.conflict_reasons for link in report.links)
+
+
+def test_compatible_hint_without_strong_id_is_possible_match_not_exact():
+    a = _obs(
+        observation_id="hint-a",
+        gtin="",
+        asin="",
+        mpn="",
+        brand="Acme",
+        model="WP-200",
+        pack_size="1",
+        candidate_id_hint="review-only-hint",
+        title="Acme Widget listing A",
+        source_record_id="ra",
+    )
+    b = _obs(
+        observation_id="hint-b",
+        gtin="",
+        asin="",
+        mpn="",
+        brand="Acme",
+        model="WP-200",
+        pack_size="1",
+        candidate_id_hint="review-only-hint",
+        title="Acme Widget listing B",
+        source_record_id="rb",
+        source_kind="supplier",
+        source_system="cj",
+        evidence_mode="manual_import",
+    )
+    report = resolve_product_identity([a, b])
+    states = {link.match_state for link in report.links}
+    assert "exact_match" not in states
+    assert states <= {"possible_match", "ambiguous", "unmatched"}
+    assert len({link.candidate_key for link in report.links}) == 2
+
+
+def test_opportunity_synthesis_handoff_contract_for_pr_483():
+    marketplace = _obs(
+        observation_id="syn-m",
+        gtin="012345678905",
+        source_record_id="syn-m",
+    )
+    supplier = _obs(
+        observation_id="syn-s",
+        source_kind="supplier",
+        source_system="cj",
+        source_record_id="syn-s",
+        gtin="012345678905",
+        evidence_mode="manual_import",
+    )
+    conflict_a = _obs(
+        observation_id="syn-c1",
+        source_record_id="syn-c1",
+        gtin="",
+        asin="",
+        mpn="",
+        brand="Acme",
+        model="A",
+        pack_size="2",
+        candidate_id_hint="conflict-hint",
+        title="Title One",
+    )
+    conflict_b = _obs(
+        observation_id="syn-c2",
+        source_record_id="syn-c2",
+        gtin="",
+        asin="",
+        mpn="",
+        brand="Beta",
+        model="B",
+        pack_size="6",
+        candidate_id_hint="conflict-hint",
+        title="Title Two",
+    )
+    report = resolve_product_identity([marketplace, supplier, conflict_a, conflict_b])
+    handoff = to_opportunity_synthesis_handoff(report)
+    assert handoff["contract_version"] == "product-identity-synthesis-handoff-v1"
+    assert handoff["candidate_id_hint_is_not_exact_basis"] is True
+    assert set(handoff["auto_merge_allowed_states"]) == {"exact_match"}
+    assert "possible_match" in handoff["never_auto_merge_states"]
+    assert "syn-m" in handoff["exact_match_observation_ids"]
+    assert "syn-s" in handoff["exact_match_observation_ids"]
+    assert "syn-c1" in handoff["conflict_observation_ids"]
+    assert handoff["by_observation_id"]["syn-m"]["match_state"] == "exact_match"
+    assert handoff["pillar_separation"]["product_identity_is_not_attention_evidence"] is True
+    assert handoff["pillar_separation"]["product_identity_is_not_supplier_proof"] is True
+    # Handoff is a pure projection — no synthesis module import side effects.
+    assert "opportunity_synthesis" not in json.dumps(handoff)

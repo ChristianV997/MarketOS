@@ -1,0 +1,47 @@
+{
+  "fixture_id": "product-identity-conflicting-source-records-v1",
+  "description": "Duplicate source_record_id with conflicting pack/model must not collapse into exact_match.",
+  "observations": [
+    {
+      "observation_id": "src-a",
+      "workspace_id": "ws-source",
+      "source_kind": "marketplace",
+      "source_system": "amazon",
+      "source_record_id": "same-listing-key",
+      "title": "Acme Widget",
+      "brand": "Acme",
+      "model": "WP-200",
+      "gtin": "",
+      "asin": "",
+      "mpn": "WP-200",
+      "pack_size": "2",
+      "evidence_mode": "fixture",
+      "candidate_id_hint": "widget"
+    },
+    {
+      "observation_id": "src-b",
+      "workspace_id": "ws-source",
+      "source_kind": "marketplace",
+      "source_system": "amazon",
+      "source_record_id": "same-listing-key",
+      "title": "Acme Widget",
+      "brand": "Acme",
+      "model": "WP-900",
+      "gtin": "",
+      "asin": "",
+      "mpn": "WP-200",
+      "pack_size": "6",
+      "evidence_mode": "fixture",
+      "candidate_id_hint": "widget"
+    }
+  ],
+  "expect": {
+    "shared_candidate_key": false,
+    "match_states": ["conflict"],
+    "forbidden_states": ["exact_match"],
+    "required_conflict_reasons": [
+      "variant_or_pack_size_conflict",
+      "brand_or_model_conflict"
+    ]
+  }
+}

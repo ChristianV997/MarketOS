@@ -45,19 +45,60 @@ Automatic `exact_match` requires **one** of the following, within the same
 4. Same seller SKU **scoped to** `(source_system, seller_id)` — never global
 5. Same `(source_kind, source_system, source_record_id)` duplicate observation
 
+`candidate_id_hint` is **never** an exact-match basis. A shared hint with
+compatible attributes may emit `possible_match` for review. A shared hint with
+conflicting pack size, variant size/color, brand, or model emits `conflict`
+(`candidate_id_hint_does_not_override_variant`) and keeps distinct candidate keys.
+
+## Product-versus-variant contract
+
+| Signal | Compatible variants | Conflicting pack/model/brand/variant |
+|---|---|---|
+| Strong ID (GTIN/ASIN/brand+MPN/scoped SKU/source record) | `exact_match` when attributes compatible | Split clusters → `conflict`, no shared exact key |
+| `candidate_id_hint` alone | `possible_match` (review only) | `conflict`, never `exact_match` |
+| Name/title alone | `possible_match` / `ambiguous` | `conflict` or separate keys; never `exact_match` |
+| Missing identifiers | `unmatched` / name review only | n/a |
+
+Empty variant fields are treated as unknown (compatible), not as zero/default.
+
 ## Safety limits
 
 - Seller SKUs are **not** globally unique across sellers or source systems.
 - Name-only / similarity-only matches may emit `possible_match` or `ambiguous`;
   they never produce `exact_match`.
-- Pack-size / variant conflicts block auto-merge even when brand+MPN align.
+- Pack-size / variant conflicts block auto-merge even when brand+MPN or GTIN align.
 - Conflicting GTINs/ASINs/brand-MPN pairs never merge.
 - Workspaces never share candidate keys.
 - Evidence modes are preserved; fixture/manual are never upgraded to live.
 - Consumer-attention links (even on GTIN) remain labeled
   `source_kind=consumer_attention` and are not supplier or price proof.
+- Product identity is not attention evidence, marketplace price proof, or supplier proof.
 - The resolver does not invent GTINs or manufacturer identifiers.
 - Results are deterministic and idempotent under input reordering.
+
+## Integration handoff for opportunity synthesis (#483)
+
+Do **not** edit `evaluation/commerce/opportunity_synthesis.py` from this lane.
+Consume the tested projection:
+
+```python
+from evaluation.commerce.product_identity_resolution import (
+    resolve_product_identity,
+    to_opportunity_synthesis_handoff,
+)
+
+report = resolve_product_identity(observations)
+handoff = to_opportunity_synthesis_handoff(report)
+# handoff["by_observation_id"][obs_id]["candidate_key" | "match_state" | ...]
+# Auto-join only when match_state == "exact_match"
+```
+
+Contract version: `product-identity-synthesis-handoff-v1`
+
+- `auto_merge_allowed_states`: `["exact_match"]`
+- `never_auto_merge_states`: possible_match, ambiguous, conflict, unmatched
+- `candidate_id_hint_is_not_exact_basis`: always true
+- Pillar flags keep identity separate from attention / price / supplier proof
 
 ## OSS pattern review (search-first)
 
@@ -74,7 +115,7 @@ No third-party matching library was added. No upstream code was copied.
 
 ## Out of scope
 
-- Opportunity synthesis / scoring changes
+- Opportunity synthesis / scoring changes (handoff only; #483 owns synthesis)
 - Provider adapters, API routes, frontend mounts
 - Event-ID collision work
 - Shared schema redesign
@@ -82,4 +123,5 @@ No third-party matching library was added. No upstream code was copied.
 
 ## Tests
 
-`tests/test_product_identity_resolution.py` — synthetic fixtures only.
+`tests/test_product_identity_resolution.py` — synthetic fixtures only, including
+adversarial JSON under `tests/fixtures/product_identity_resolution/`.

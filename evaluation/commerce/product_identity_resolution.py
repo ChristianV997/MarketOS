@@ -186,6 +186,11 @@ class ProductObservation:
         return f"{self.source_kind}|{self.source_system}|{self.source_record_id}"
 
     @property
+    def candidate_hint_key(self) -> str:
+        """Workspace-local candidate hint — never a strong exact-match basis."""
+        return _norm_token(self.candidate_id_hint)
+
+    @property
     def variant_fingerprint(self) -> tuple[str, str, str]:
         return (
             _norm_token(self.pack_size),
@@ -281,6 +286,9 @@ class ProductIdentityResolutionReport:
             "consumer_attention_is_not_supplier_proof": True,
             "consumer_attention_is_not_marketplace_price_proof": True,
             "fixture_manual_never_upgraded_to_live": True,
+            "product_identity_is_not_attention_evidence": True,
+            "product_identity_is_not_marketplace_price_proof": True,
+            "product_identity_is_not_supplier_proof": True,
         }
     )
 
@@ -293,6 +301,54 @@ class ProductIdentityResolutionReport:
             "warnings": list(self.warnings),
             "pillar_separation": dict(self.pillar_separation),
         }
+
+
+def to_opportunity_synthesis_handoff(
+    report: ProductIdentityResolutionReport,
+) -> dict[str, Any]:
+    """Stable, tested handoff for opportunity-synthesis consumers (#483).
+
+    Does not import or mutate ``opportunity_synthesis``. Callers may attach
+    ``candidate_key`` / ``match_state`` onto pillar evidence; they must not
+    treat identity links as attention, price, supplier, or launch authority.
+    """
+    exact_links = tuple(link for link in report.links if link.match_state == "exact_match")
+    conflict_links = tuple(link for link in report.links if link.match_state == "conflict")
+    review_links = tuple(
+        link for link in report.links if link.match_state in {"possible_match", "ambiguous"}
+    )
+    by_observation = {
+        link.observation_id: {
+            "candidate_key": link.candidate_key,
+            "match_state": link.match_state,
+            "match_basis": list(link.match_basis),
+            "conflict_reasons": list(link.conflict_reasons),
+            "source_kind": link.source_kind,
+            "evidence_mode": link.evidence_mode,
+            "workspace_id": link.workspace_id,
+        }
+        for link in report.links
+    }
+    return {
+        "contract_version": "product-identity-synthesis-handoff-v1",
+        "schema_version": report.schema_version,
+        "exact_match_observation_ids": [link.observation_id for link in exact_links],
+        "conflict_observation_ids": [link.observation_id for link in conflict_links],
+        "review_only_observation_ids": [link.observation_id for link in review_links],
+        "by_observation_id": by_observation,
+        "candidates": [dict(item) for item in report.candidates],
+        "auto_merge_allowed_states": ["exact_match"],
+        "never_auto_merge_states": ["possible_match", "ambiguous", "conflict", "unmatched"],
+        "candidate_id_hint_is_not_exact_basis": True,
+        "pillar_separation": dict(report.pillar_separation),
+        "warnings": list(report.warnings),
+        "integration_notes": [
+            "Consume only exact_match candidate_key joins for automatic fusion.",
+            "possible_match/ambiguous require human review; conflict blocks merge.",
+            "candidate_id_hint never authorizes exact_match by itself.",
+            "Identity links are not attention, marketplace price, or supplier proof.",
+        ],
+    }
 
 
 def _stable_key(workspace_id: str, namespace: str, material: str) -> str:
@@ -424,6 +480,7 @@ def resolve_product_identity(
         "product_identity_resolution_does_not_authorize_launch_or_spend",
         "seller_skus_are_not_globally_unique",
         "name_only_matches_are_review_only",
+        "candidate_id_hint_is_never_exact_match_basis",
         "fixture_or_manual_evidence_is_never_upgraded_to_live",
     ]
 
@@ -466,6 +523,35 @@ def resolve_product_identity(
             consider_exact(group, "brand_mpn")
         for _key, group in sorted(_index_by(workspace_obs, lambda o: o.seller_sku_key).items()):
             consider_exact(group, "seller_sku_scoped")
+
+        # candidate_id_hint is workspace-local sugar only. It never unions
+        # components into exact_match; shared hints with attribute conflicts
+        # surface conflict, and compatible hint-only peers stay review-only.
+        for _hint, group in sorted(_index_by(workspace_obs, lambda o: o.candidate_hint_key).items()):
+            if len(group) < 2:
+                continue
+            members = tuple(sorted(group, key=lambda item: item.observation_id))
+            for i, left in enumerate(members):
+                for right in members[i + 1 :]:
+                    conflicts = _attribute_conflict(left, right)
+                    if conflicts:
+                        conflict_for[left.observation_id].update(conflicts)
+                        conflict_for[right.observation_id].update(conflicts)
+                        conflict_for[left.observation_id].add("candidate_id_hint_does_not_override_variant")
+                        conflict_for[right.observation_id].add("candidate_id_hint_does_not_override_variant")
+                        conflict_peers[left.observation_id].add(right.observation_id)
+                        conflict_peers[right.observation_id].add(left.observation_id)
+                        review_state[left.observation_id] = "conflict"
+                        review_state[right.observation_id] = "conflict"
+                    elif uf.find(left.observation_id) != uf.find(right.observation_id):
+                        # Compatible but hint-only — never exact.
+                        if not exact_basis[left.observation_id] or not exact_basis[right.observation_id]:
+                            review_peers[left.observation_id].add(right.observation_id)
+                            review_peers[right.observation_id].add(left.observation_id)
+                            if review_state.get(left.observation_id) != "conflict":
+                                review_state[left.observation_id] = "possible_match"
+                            if review_state.get(right.observation_id) != "conflict":
+                                review_state[right.observation_id] = "possible_match"
 
         title_index = _index_by(workspace_obs, lambda o: o.normalized_title)
         for _title_key, group in sorted(title_index.items()):
@@ -644,5 +730,8 @@ def resolve_product_identity(
             "consumer_attention_is_not_supplier_proof": True,
             "consumer_attention_is_not_marketplace_price_proof": True,
             "fixture_manual_never_upgraded_to_live": True,
+            "product_identity_is_not_attention_evidence": True,
+            "product_identity_is_not_marketplace_price_proof": True,
+            "product_identity_is_not_supplier_proof": True,
         },
     )
