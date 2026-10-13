@@ -82,6 +82,12 @@ def test_shipping_currency_mismatch_fails_at_canonical_boundary(offer_factory):
 
     record = import_json(Path(__file__).resolve().parents[2] / "fixtures" / "supplier_feasibility" / "cj_validation_pack_success.json", supplier="cj", source_type="cj_validation_pack_report")[0]
     record = replace(record, shipping_currency="EUR")
+    offer = build_offer_from_supplier_evidence(record)
+    assert offer.quoted_price is not None
+    assert offer.quoted_price.currency == "USD"
+    assert offer.goods is not None
+    assert offer.goods.shipping.supplier_shipping is not None
+    assert offer.goods.shipping.supplier_shipping.currency == "EUR"
     with pytest.raises(CurrencyMismatchError):
         build_report_from_supplier_evidence(
             record,
@@ -126,3 +132,72 @@ def test_stale_and_conflicting_import_metadata_remain_uncertain(offer_factory):
     assert conflicting_offer.price_evidence.quality == "conflicting"
     assert conflicting_offer.price_evidence.evidence_ref is not None
     assert conflicting_offer.price_evidence.evidence_ref.human_confirmed is False
+
+
+def test_destination_warehouse_and_supplier_facts_remain_candidate_bound(offer_factory):
+    from backend.adapters.research.supplier_feasibility import import_json
+    from pathlib import Path
+
+    record = import_json(Path(__file__).resolve().parents[2] / "fixtures" / "supplier_feasibility" / "cj_validation_pack_success.json", supplier="cj", source_type="cj_validation_pack_report")[0]
+    record = replace(record, warehouse_region="CN-SH", destination_region="MX-NL", fulfillment_method="direct freight")
+    offer = build_offer_from_supplier_evidence(record)
+
+    assert offer.goods is not None
+    assert offer.goods.fulfillment_mode == "direct_freight"
+    assert offer.goods.moq_availability.minimum_order_quantity == 1
+    assert offer.goods.moq_availability.available_quantity == 420
+    assert offer.goods.lead_time.minimum_days == 7
+    assert offer.goods.lead_time.maximum_days == 12
+    assert offer.goods.supplier_evidence.evidence_ref is not None
+    assert offer.goods.supplier_evidence.evidence_ref.origin == "CN-SH"
+    assert offer.goods.supplier_evidence.evidence_ref.destination == "MX-NL"
+    assert offer.goods.supplier_evidence.evidence_ref.human_confirmed is False
+
+
+def test_missing_logistics_facts_stay_unknown_and_blocked(offer_factory):
+    from backend.adapters.research.supplier_feasibility import import_json
+    from pathlib import Path
+
+    record = import_json(Path(__file__).resolve().parents[2] / "fixtures" / "supplier_feasibility" / "cj_validation_pack_success.json", supplier="cj", source_type="cj_validation_pack_report")[0]
+    record = replace(
+        record,
+        shipping_cost=None,
+        shipping_currency=None,
+        moq=None,
+        inventory_status=None,
+        inventory_quantity=None,
+        warehouse_region="",
+        destination_region="",
+        delivery_min_days=None,
+        delivery_max_days=None,
+        fulfillment_method="",
+        field_provenance={"unit_cost": "fixture"},
+    )
+    offer = build_offer_from_supplier_evidence(record)
+
+    assert offer.goods is not None
+    assert offer.goods.shipping.supplier_shipping is None
+    assert offer.goods.shipping.evidence.quality == "missing"
+    assert offer.goods.moq_availability.minimum_order_quantity is None
+    assert offer.goods.moq_availability.available_quantity is None
+    assert offer.goods.moq_availability.availability_status == "unknown"
+    assert offer.goods.moq_availability.evidence.quality == "missing"
+    assert offer.goods.lead_time.minimum_days is None
+    assert offer.goods.lead_time.maximum_days is None
+    assert offer.goods.lead_time.evidence.quality == "missing"
+    assert offer.goods.fulfillment_mode == "unknown"
+    assert offer.goods.logistics_evidence.quality == "missing"
+
+    report = build_report_from_supplier_evidence(
+        record,
+        target_price=Money("50", "USD", source="operator_input", provenance="assumed", evidence_state="assumed"),
+        generated_at=GENERATED_AT,
+    )
+    assert {entry.category for entry in report.risk_matrix} >= {
+        "moq_availability",
+        "lead_time",
+        "logistics",
+        "shipping_cost",
+    }
+    assert any("logistics: evidence is missing" in blocker for blocker in report.blockers)
+    assert any("shipping_cost: evidence is missing" in blocker for blocker in report.blockers)
