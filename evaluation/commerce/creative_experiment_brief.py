@@ -131,6 +131,37 @@ def _records(candidate: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:
     return [row for row in evidence if isinstance(row, Mapping)]
 
 
+_FRESHNESS_STATES = frozenset({"fresh", "stale", "future_dated", "unavailable"})
+
+
+def _freshness_block(candidate: Mapping[str, Any] | None) -> str | None:
+    """Return a blocker when the report's freshness set is not exclusively fresh.
+
+    ``freshness_statuses`` is the unique set already stored on the attention
+    candidate. It is not a per-record index, so a mixed or non-fresh set
+    cannot be attributed to one evidence row. Those rows stay unlinked.
+    A missing key is not rewritten into a freshness label.
+    """
+    if candidate is None or "freshness_statuses" not in candidate:
+        return None
+    raw = candidate.get("freshness_statuses")
+    if not isinstance(raw, list) or not raw:
+        return "attention_not_fresh"
+    states: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            return "attention_not_fresh"
+        state = item.strip().lower()
+        if state not in _FRESHNESS_STATES:
+            return "attention_not_fresh"
+        states.append(state)
+    if set(states) == {"fresh"}:
+        return None
+    if "stale" in states:
+        return "stale_attention_evidence"
+    return "attention_not_fresh"
+
+
 def _market_reasons(
     records: Sequence[Mapping[str, Any]], geography: str, language: str
 ) -> tuple[list[str], list[str], list[str]]:
@@ -377,12 +408,17 @@ def build_creative_experiment_brief(
             observed_geos, observed_langs = [], []
             if "missing_attention_evidence" not in reasons:
                 reasons.append("missing_attention_evidence")
+        freshness_reason = _freshness_block(attention_row)
+        if freshness_reason:
+            reasons.append(freshness_reason)
     if attention_row is None:
         observed_geos, observed_langs = [], []
     blocked = (
         "contradictory_attention_evidence" in reasons
         or "missing_attention_evidence" in reasons
         or "market_context_required" in reasons
+        or "stale_attention_evidence" in reasons
+        or "attention_not_fresh" in reasons
     )
     market_blocked = any(
         item in reasons for item in ("region_mismatch", "language_mismatch", "attention_market_unobserved")
@@ -397,8 +433,9 @@ def build_creative_experiment_brief(
         reasons.append("missing_observed_attention")
     if problems and not hypotheses:
         reasons.append("no_testable_message")
+    linkable = [] if blocked else records
     rejected = (
-        _unsupported(asserted_claims, records, geography, language)
+        _unsupported(asserted_claims, linkable, geography, language)
         if geography and language
         else [{"text": _clip(item), "reason": "unsupported_claim"} for item in asserted_claims if _clip(item)]
     )
@@ -429,6 +466,8 @@ def build_creative_experiment_brief(
                 "language_mismatch",
                 "attention_market_unobserved",
                 "market_context_required",
+                "stale_attention_evidence",
+                "attention_not_fresh",
                 "missing_observed_attention",
                 "no_testable_message",
                 "unsupported_claims_only",

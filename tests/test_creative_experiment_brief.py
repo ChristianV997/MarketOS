@@ -246,3 +246,173 @@ def test_cli_rejects_secret_shaped_input(tmp_path: Path):
     assert completed.returncode == 2
     assert "abcdefghijklmnop" not in completed.stdout
     assert json.loads(completed.stdout)["error"] == "malformed creative brief input"
+
+
+def _walk_keys(value):
+    if isinstance(value, dict):
+        yield from value
+        for item in value.values():
+            yield from _walk_keys(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _walk_keys(item)
+
+
+def _evidence(**extra):
+    from evaluation.commerce.consumer_attention import ConsumerAttentionEvidence
+
+    fields = {
+        "candidate_id": "cand-1",
+        "query": "compact steamer",
+        "source": "fixture-note",
+        "source_type": "fixture_demo",
+        "platform": "manual",
+        "evidence_mode": "observed",
+        "pain_point": "wrinkles before a meeting",
+        "hook": "show the collar before the meeting",
+        "objection": "thick fabric may not respond",
+        "angle": "demo",
+        "geography": "MX",
+        "language": "es",
+        "observed_at": "2026-05-01T00:00:00Z",
+    }
+    fields.update(extra)
+    return ConsumerAttentionEvidence(**fields)
+
+
+def _report(*records, as_of="2026-06-01T00:00:00Z"):
+    from evaluation.commerce.consumer_attention import build_report
+
+    return build_report(list(records), evidence_mode="fixture", as_of=as_of).to_dict()
+
+
+def _cli(tmp_path: Path, attention: dict) -> dict:
+    folder = tmp_path / "case"
+    folder.mkdir(parents=True)
+    synthesis = folder / "synthesis.json"
+    report = folder / "attention.json"
+    synthesis.write_text(
+        json.dumps(_synthesis(top_hooks=["show the collar before the meeting"])),
+        encoding="utf8",
+    )
+    report.write_text(json.dumps(attention), encoding="utf8")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "run_creative_experiment_brief.py"),
+            "--synthesis",
+            str(synthesis),
+            "--attention",
+            str(report),
+            "--geography",
+            "MX",
+            "--language",
+            "es",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+    assert completed.returncode == 0, completed.stderr
+    document = json.loads(completed.stdout)
+    assert "observation_id" not in set(_walk_keys(document))
+    _authority(document)
+    return document
+
+
+def test_cli_links_only_current_matching_attention(tmp_path: Path):
+    fresh = _cli(tmp_path / "fresh", _report(_evidence()))
+    assert fresh["outcome"] == "draft_brief"
+    assert fresh["customer_problem"]["product_fact"] is False
+    assert fresh["customer_problem"]["statement"] == "wrinkles before a meeting"
+    ref = fresh["customer_problem"]["evidence_refs"][0]
+    assert ref["source"] == "consumer_attention.candidates.evidence"
+    assert ref["record_index"] == 0
+    assert ref["field"] == "pain_point"
+    assert ref["evidence_mode"] == "observed"
+    assert set(ref) == {"source", "candidate_id", "record_index", "field", "evidence_mode"}
+    assert fresh["hypotheses"][0]["product_fact"] is False
+    assert fresh["hypotheses"][0]["status"] == "testable_draft"
+    assert fresh["authority"]["spend_authorized"] is False
+    assert fresh["authority"]["targeting_activated"] is False
+    assert fresh["authority"]["published"] is False
+    assert fresh["authority"]["customer_messages_sent"] is False
+    assert fresh["authority"]["launch_authorized"] is False
+    assert fresh["audience_market"]["targeting_activated"] is False
+
+    missing = _cli(tmp_path / "missing", _report())
+    assert missing["outcome"] == "insufficient_evidence"
+    assert "missing_attention_evidence" in missing["insufficient_evidence_reasons"]
+    assert missing["customer_problem"] is None
+    assert missing["hypotheses"] == []
+
+    stale = _cli(tmp_path / "stale", _report(_evidence(observed_at="2025-01-01T00:00:00Z")))
+    assert stale["outcome"] == "insufficient_evidence"
+    assert "stale_attention_evidence" in stale["insufficient_evidence_reasons"]
+    assert stale["customer_problem"] is None
+    assert stale["hypotheses"] == []
+    assert "wrinkles before a meeting" not in json.dumps(stale["customer_problem"])
+    assert "show the collar before the meeting" not in json.dumps(stale["hypotheses"])
+
+    mixed = _report(
+        _evidence(source="fresh-note", pain_point="fresh wrinkle note", hook="fresh collar hook"),
+        _evidence(
+            source="stale-note",
+            observed_at="2025-01-01T00:00:00Z",
+            pain_point="stale wrinkle note",
+            hook="stale collar hook",
+        ),
+    )
+    assert mixed["candidates"][0]["freshness_statuses"] == ["fresh", "stale"]
+    mixed_brief = _cli(tmp_path / "mixed", mixed)
+    assert mixed_brief["outcome"] == "insufficient_evidence"
+    assert "stale_attention_evidence" in mixed_brief["insufficient_evidence_reasons"]
+    assert mixed_brief["customer_problem"] is None
+    rendered = json.dumps({"problem": mixed_brief["customer_problem"], "hypotheses": mixed_brief["hypotheses"]})
+    assert "fresh wrinkle note" not in rendered
+    assert "stale wrinkle note" not in rendered
+
+    conflict = _cli(
+        tmp_path / "conflict",
+        _report(
+            _evidence(
+                source="left-note", observation_key="ship_days", observation_value="2", pain_point="ships in two days"
+            ),
+            _evidence(
+                source="right-note",
+                observation_key="ship_days",
+                observation_value="20",
+                pain_point="ships in twenty days",
+                hook="wait three weeks",
+            ),
+        ),
+    )
+    assert conflict["outcome"] == "insufficient_evidence"
+    assert "contradictory_attention_evidence" in conflict["insufficient_evidence_reasons"]
+    assert conflict["conflicting_observation_keys"] == ["ship_days"]
+    assert conflict["customer_problem"] is None
+    assert conflict["hypotheses"] == []
+    conflict_text = json.dumps({"problem": conflict["customer_problem"], "hypotheses": conflict["hypotheses"]})
+    assert "ships in two days" not in conflict_text
+    assert "ships in twenty days" not in conflict_text
+
+    region = _cli(
+        tmp_path / "region",
+        _report(_evidence(geography="US", pain_point="domestic shipping delay")),
+    )
+    assert region["outcome"] == "insufficient_evidence"
+    assert "region_mismatch" in region["insufficient_evidence_reasons"]
+    assert region["customer_problem"] is None
+    assert region["hypotheses"] == []
+    assert "domestic shipping delay" not in json.dumps(region["customer_problem"])
+
+    language = _cli(
+        tmp_path / "language",
+        _report(_evidence(language="en", hook="show it in english")),
+    )
+    assert language["outcome"] == "insufficient_evidence"
+    assert "language_mismatch" in language["insufficient_evidence_reasons"]
+    assert language["customer_problem"] is None
+    assert language["hypotheses"] == []
+    assert "show it in english" not in json.dumps(language["hypotheses"])
