@@ -44,6 +44,179 @@ def test_full_fixture_preserves_identity_evidence_and_canonical_ranking() -> Non
     }
 
 
+def test_evidence_coverage_preserves_pillar_modes_and_one_research_step() -> None:
+    report = build_owner_opportunity_read_model("evaluate", product_payload()).to_dict()
+
+    assert report["next_research_step"] == report["opportunities"][0]["next_research_step"]
+    assert report["next_research_pillar"] == "consumer_attention"
+    coverage = report["evidence_coverage"]
+    assert set(coverage) == {"marketplace", "supplier", "consumer_attention"}
+    assert coverage["marketplace"] == {
+        "status": "supplied",
+        "evidence_mode": "fixture_demo",
+        "evidence_classes": ["fixture"],
+        "freshness_statuses": ["current"],
+        "missing": False,
+        "incomplete": False,
+        "stale": False,
+        "conflicting": False,
+        "fixture_only": True,
+        "manual_imported": False,
+        "evidence_count": 1,
+        "evidence_refs": [
+            {
+                "evidence_id": "desk-demand",
+                "source_type": "fixture",
+                "source_ref": "fixture://market/desk-lamp",
+                "evidence_class": "fixture",
+                "freshness": "current",
+                "status": "observed_fact",
+                "conflicting": False,
+            }
+        ],
+    }
+    assert coverage["supplier"]["evidence_mode"] == "manual_import"
+    assert coverage["supplier"]["manual_imported"] is True
+    assert coverage["supplier"]["fixture_only"] is False
+    assert coverage["consumer_attention"]["fixture_only"] is True
+    assert coverage["consumer_attention"]["incomplete"] is True
+    assert coverage["consumer_attention"]["evidence_count"] == 0
+    assert coverage["consumer_attention"]["evidence_refs"] == []
+
+
+@pytest.mark.parametrize(
+    ("freshness", "expected_stale"),
+    [("current", False), ("stale", True)],
+)
+def test_canonical_consumer_attention_area_preserves_manual_freshness(
+    freshness: str, expected_stale: bool
+) -> None:
+    payload = product_payload()
+    payload["candidates"][0]["evidence"].append(
+        {
+            "evidence_id": "attention-manual-1",
+            "area": "consumer_attention",
+            "status": "observed_fact",
+            "evidence_class": "manual",
+            "source_type": "operator",
+            "source_ref": "manual://attention/desk-lamp",
+            "freshness": freshness,
+        }
+    )
+
+    result = build_owner_opportunity_read_model("evaluate", payload).to_dict()
+    coverage = result["opportunities"][0]["evidence_coverage"]["consumer_attention"]
+
+    assert coverage["status"] == "supplied"
+    assert coverage["evidence_classes"] == ["manual"]
+    assert coverage["freshness_statuses"] == [freshness]
+    assert coverage["manual_imported"] is True
+    assert coverage["fixture_only"] is False
+    assert coverage["stale"] is expected_stale
+    assert coverage["evidence_refs"][0]["evidence_id"] == "attention-manual-1"
+    assert coverage["evidence_refs"][0]["freshness"] == freshness
+
+
+def test_evidence_coverage_marks_missing_stale_and_conflicting_pillars() -> None:
+    payload = product_payload()
+    payload["candidates"][0]["reports"].pop("consumer")
+    payload["candidates"][0]["evidence"][0]["freshness"] = "stale"
+    payload["candidates"][0]["evidence"][0]["conflicting"] = True
+
+    report = build_owner_opportunity_read_model("evaluate", payload).to_dict()
+    coverage = report["opportunities"][0]["evidence_coverage"]
+
+    assert coverage["consumer_attention"]["missing"] is True
+    assert coverage["consumer_attention"]["status"] == "missing"
+    assert coverage["marketplace"]["stale"] is True
+    assert coverage["marketplace"]["conflicting"] is True
+    assert report["next_research_pillar"] == "consumer_attention"
+
+
+def test_report_without_matching_candidate_is_not_coverage_for_that_pillar() -> None:
+    payload = product_payload()
+    payload["candidates"][0]["reports"]["consumer"]["candidates"][0]["candidate_id"] = (
+        "other-candidate"
+    )
+
+    report = build_owner_opportunity_read_model("evaluate", payload).to_dict()
+    coverage = report["opportunities"][0]["evidence_coverage"]["consumer_attention"]
+
+    assert coverage["status"] == "missing"
+    assert coverage["missing"] is True
+    assert coverage["evidence_mode"] == "missing"
+    assert coverage["evidence_refs"] == []
+
+
+def test_matching_report_preserves_stale_evidence_reference_without_upgrading_it() -> None:
+    payload = product_payload()
+    payload["candidates"][0]["evidence"] = [
+        evidence
+        for evidence in payload["candidates"][0]["evidence"]
+        if evidence["area"] not in {"demand", "competition"}
+    ]
+    payload["candidates"][0]["reports"]["marketplace"]["candidates"][0]["evidence"] = [
+        {
+            "evidence_id": "market-observation-1",
+            "source_type": "public_page",
+            "source_ref": "https://example.test/listing/desk-lamp",
+            "evidence_class": "observed",
+            "freshness": "stale",
+            "status": "observed_fact",
+            "conflicting": False,
+        }
+    ]
+
+    result = build_owner_opportunity_read_model("evaluate", payload).to_dict()
+    coverage = result["opportunities"][0]["evidence_coverage"]["marketplace"]
+
+    assert coverage["status"] == "supplied"
+    assert coverage["incomplete"] is False
+    assert coverage["stale"] is True
+    assert coverage["evidence_count"] == 1
+    assert coverage["evidence_refs"] == [
+        {
+            "evidence_id": "market-observation-1",
+            "source_type": "public_page",
+            "source_ref": "https://example.test/listing/desk-lamp",
+            "evidence_class": "observed",
+            "freshness": "stale",
+            "status": "observed_fact",
+            "conflicting": False,
+        }
+    ]
+
+
+def test_malformed_report_evidence_metadata_fails_closed_without_losing_identity() -> None:
+    payload = product_payload()
+    payload["candidates"][0]["evidence"] = [
+        evidence
+        for evidence in payload["candidates"][0]["evidence"]
+        if evidence["area"] not in {"demand", "competition"}
+    ]
+    payload["candidates"][0]["reports"]["marketplace"]["candidates"][0]["evidence"] = [
+        {
+            "evidence_id": "market-observation-2",
+            "source_type": "public_page",
+            "source_ref": "https://example.test/listing/desk-lamp",
+            "evidence_class": ["live_validated"],
+            "freshness": {"status": "current"},
+            "status": "observed_fact",
+            "conflicting": False,
+        }
+    ]
+
+    result = build_owner_opportunity_read_model("evaluate", payload).to_dict()
+    coverage = result["opportunities"][0]["evidence_coverage"]["marketplace"]
+
+    assert coverage["evidence_refs"][0]["evidence_id"] == "market-observation-2"
+    assert coverage["evidence_refs"][0]["evidence_class"] == "unknown"
+    assert coverage["evidence_refs"][0]["freshness"] == "unknown"
+    assert coverage["evidence_classes"] == []
+    assert coverage["freshness_statuses"] == ["unknown"]
+    assert coverage["stale"] is False
+
+
 def test_partial_and_missing_evidence_remain_visible() -> None:
     payload = product_payload()
     payload["candidates"][0]["reports"].pop("consumer")

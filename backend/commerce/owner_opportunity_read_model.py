@@ -22,6 +22,7 @@ from backend.workspaces.registry import WorkspaceRegistry
 from services.opportunity_discovery.service import (
     DISCOVERY_MODES,
     DiscoveryRun,
+    EVIDENCE_CLASSES,
     OpportunityCandidate,
     OpportunityDecision,
     OpportunityDiscoveryError,
@@ -37,6 +38,26 @@ SNAPSHOT_RESOLUTION = {
     "resolver": "unavailable",
 }
 _INTERNAL_VALUE = re.compile(r"(?:system\s+prompt|internal\s+prompt|raw\s+payload|source\s+code|\bformula\b)", re.IGNORECASE)
+_EVIDENCE_MODES = frozenset(
+    {
+        "live_readonly",
+        "public_live",
+        "authenticated_live",
+        "manual_import",
+        "fixture_demo",
+        "fixture",
+    }
+)
+_FRESHNESS_STATUSES = frozenset({"current", "stale", "future", "unknown"})
+_PILLARS = (
+    ("marketplace", "marketplace", frozenset({"competition", "demand", "marketplace", "price"})),
+    ("supplier", "supplier", frozenset({"economics", "supplier", "supply"})),
+    (
+        "consumer_attention",
+        "consumer",
+        frozenset({"attention", "consumer", "consumer_attention", "creative", "engagement"}),
+    ),
+)
 
 _ECONOMIC_OUTPUT_FIELDS = frozenset(
     {
@@ -170,6 +191,191 @@ def _evidence_view(candidate: OpportunityCandidate) -> tuple[dict[str, Any], ...
     )
 
 
+def _report_evidence(report: Any, candidate_id: str) -> tuple[Mapping[str, Any], ...]:
+    """Read only bounded evidence metadata from a supplied report row."""
+    if not isinstance(report, Mapping):
+        return ()
+    candidates = report.get("candidates")
+    if not isinstance(candidates, list):
+        return ()
+    row = next(
+        (
+            item
+            for item in candidates
+            if isinstance(item, Mapping) and item.get("candidate_id") == candidate_id
+        ),
+        None,
+    )
+    if not isinstance(row, Mapping):
+        return ()
+    entries: list[Mapping[str, Any]] = []
+    for field in ("evidence", "offers"):
+        values = row.get(field)
+        if isinstance(values, list):
+            entries.extend(item for item in values if isinstance(item, Mapping))
+    return tuple(entries)
+
+
+def _report_has_candidate(report: Any, candidate_id: str) -> bool:
+    if not isinstance(report, Mapping) or not isinstance(report.get("candidates"), list):
+        return False
+    return any(
+        isinstance(item, Mapping) and item.get("candidate_id") == candidate_id
+        for item in report["candidates"]
+    )
+
+
+def _reference_text(value: Any) -> str | None:
+    """Keep only bounded, printable reference metadata from a report mapping."""
+    if not isinstance(value, str) or not value.isprintable():
+        return None
+    if len(value.encode("utf-8")) > 512:
+        return None
+    return value
+
+
+def _allowed_reference_value(value: Any, allowed: frozenset[str]) -> str | None:
+    if isinstance(value, str) and value in allowed:
+        return value
+    return None
+
+
+def _evidence_reference(item: Any) -> dict[str, Any] | None:
+    """Project an evidence reference without exposing raw report internals."""
+    if isinstance(item, Mapping):
+        value = item.get
+    else:
+        value = lambda key: getattr(item, key, None)
+    evidence_id = _reference_text(value("evidence_id"))
+    source_type = _reference_text(value("source_type"))
+    source_ref = _reference_text(value("source_ref"))
+    if evidence_id is None and source_type is None and source_ref is None:
+        return None
+    status = _reference_text(value("status"))
+    return {
+        "evidence_id": evidence_id,
+        "source_type": source_type,
+        "source_ref": source_ref,
+        "evidence_class": _allowed_reference_value(value("evidence_class"), EVIDENCE_CLASSES)
+        or "unknown",
+        "freshness": _allowed_reference_value(value("freshness"), _FRESHNESS_STATUSES)
+        or "unknown",
+        "status": status,
+        "conflicting": value("conflicting") is True,
+    }
+
+
+def _evidence_coverage(candidate: OpportunityCandidate) -> dict[str, dict[str, Any]]:
+    """Project pillar coverage without upgrading evidence or inventing freshness."""
+    coverage: dict[str, dict[str, Any]] = {}
+    for pillar, report_key, areas in _PILLARS:
+        report = candidate.reports.get(report_key)
+        report_entries = _report_evidence(report, candidate.candidate_id)
+        candidate_entries = tuple(item for item in candidate.evidence if item.area in areas)
+        entries = (*candidate_entries, *report_entries)
+        evidence_refs: list[dict[str, Any]] = []
+        seen_references: set[str] = set()
+        for entry in entries:
+            reference = _evidence_reference(entry)
+            if reference is None:
+                continue
+            reference_key = _canonical(reference)
+            if reference_key in seen_references:
+                continue
+            seen_references.add(reference_key)
+            evidence_refs.append(reference)
+        raw_mode = (
+            _allowed_reference_value(report.get("evidence_mode"), _EVIDENCE_MODES)
+            if isinstance(report, Mapping)
+            else None
+        )
+        modes = {
+            value
+            for value in (
+                raw_mode,
+                *(
+                    _allowed_reference_value(item.get("evidence_mode"), _EVIDENCE_MODES)
+                    for item in report_entries
+                ),
+            )
+            if value is not None
+        }
+        classes = {
+            value
+            for value in (
+                *(
+                    _allowed_reference_value(item.evidence_class, EVIDENCE_CLASSES)
+                    for item in candidate_entries
+                ),
+                *(
+                    _allowed_reference_value(item.get("evidence_class"), EVIDENCE_CLASSES)
+                    for item in report_entries
+                ),
+            )
+            if value is not None
+        }
+        freshness = {
+            value
+            for value in (
+                *(
+                    _allowed_reference_value(item.freshness, _FRESHNESS_STATUSES)
+                    for item in candidate_entries
+                ),
+                *(
+                    _allowed_reference_value(item.get("freshness"), _FRESHNESS_STATUSES)
+                    for item in report_entries
+                ),
+            )
+            if value is not None
+        }
+        conflicting = any(
+            item.conflicting is True
+            for item in candidate_entries
+        ) or any(item.get("conflicting") is True for item in report_entries)
+        supplied = bool(
+            candidate_entries
+            or report_entries
+            or _report_has_candidate(report, candidate.candidate_id)
+        )
+        incomplete = supplied and not evidence_refs
+        if not supplied:
+            evidence_mode = "missing"
+        elif raw_mode in _EVIDENCE_MODES:
+            evidence_mode = raw_mode
+        elif modes:
+            evidence_mode = sorted(modes)[0]
+        else:
+            evidence_mode = "unknown" if supplied else "missing"
+        fixture_only = supplied and (
+            (classes and classes <= {"fixture"})
+            or (not classes and modes and modes <= {"fixture", "fixture_demo"})
+        )
+        coverage[pillar] = {
+            "status": "supplied" if supplied else "missing",
+            "evidence_mode": evidence_mode,
+            "evidence_classes": sorted(classes),
+            "freshness_statuses": sorted(freshness) or ["unknown"],
+            "missing": not supplied,
+            "incomplete": incomplete,
+            "stale": "stale" in freshness,
+            "conflicting": conflicting,
+            "fixture_only": fixture_only,
+            "manual_imported": "manual" in classes or "manual_import" in modes,
+            "evidence_count": len(evidence_refs),
+            "evidence_refs": evidence_refs,
+        }
+    return coverage
+
+
+def _next_research_pillar(coverage: Mapping[str, Mapping[str, Any]]) -> str | None:
+    """Choose one stable research target; this never starts a fetch."""
+    for state in ("missing", "incomplete", "conflicting", "stale"):
+        for pillar in ("supplier", "marketplace", "consumer_attention"):
+            if coverage.get(pillar, {}).get(state) is True:
+                return pillar
+    return None
+
+
 def _assumptions_view(candidate: OpportunityCandidate) -> dict[str, Any]:
     raw = candidate.economics.get("assumptions", {})
     if not isinstance(raw, Mapping):
@@ -210,6 +416,7 @@ def _economics_view(candidate: OpportunityCandidate, decision: OpportunityDecisi
 def _opportunity_view(candidate: OpportunityCandidate, decision: OpportunityDecision) -> dict[str, Any]:
     synthesis_score = decision.metrics.get("synthesis_score")
     synthesis_confidence = decision.synthesis.get("evidence_confidence")
+    coverage = _evidence_coverage(candidate)
     return {
         "candidate_id": candidate.candidate_id,
         "name": candidate.name,
@@ -228,9 +435,12 @@ def _opportunity_view(candidate: OpportunityCandidate, decision: OpportunityDeci
         "readiness": decision.readiness,
         "blockers": list(decision.blockers),
         "evidence_gaps": list(decision.evidence_gaps),
+        "evidence_coverage": coverage,
         "economics": _economics_view(candidate, decision),
         "client_safe_export_status": decision.trustos_export.get("status", "unavailable"),
         "next_action": decision.synthesis.get("next_best_action") or decision.experiment.question,
+        "next_research_step": decision.experiment.question,
+        "next_research_pillar": _next_research_pillar(coverage),
     }
 
 
@@ -301,6 +511,22 @@ def build_owner_opportunity_read_model(
         for candidate in _ordered_candidates(run)
         if candidate.candidate_id in decisions
     )
+    top_opportunity = opportunities[0] if opportunities else None
+    next_research_step = (
+        top_opportunity.get("next_research_step")
+        if top_opportunity is not None
+        else run.next_best_action
+    )
+    next_research_pillar = (
+        top_opportunity.get("next_research_pillar")
+        if top_opportunity is not None
+        else None
+    )
+    top_coverage = (
+        top_opportunity.get("evidence_coverage", {})
+        if top_opportunity is not None
+        else {}
+    )
     body = {
         "schema": READ_MODEL_VERSION,
         "run_id": payload.get("run_id", "opportunity-discovery-v1"),
@@ -311,6 +537,9 @@ def build_owner_opportunity_read_model(
         "opportunities": list(opportunities),
         "blockers": list(run.blockers),
         "next_best_action": run.next_best_action,
+        "next_research_step": next_research_step,
+        "next_research_pillar": next_research_pillar,
+        "evidence_coverage": top_coverage,
         "workspace_id": workspace.workspace_id if workspace is not None else None,
         "workspace_binding": "injected" if workspace is not None else "not_provided",
         "snapshot_resolution": dict(SNAPSHOT_RESOLUTION),
@@ -335,6 +564,9 @@ def build_owner_opportunity_read_model(
         opportunities=tuple(safe_body["opportunities"]),
         blockers=tuple(run.blockers),
         next_best_action=run.next_best_action,
+        next_research_step=str(safe_body["next_research_step"]),
+        next_research_pillar=safe_body["next_research_pillar"],
+        evidence_coverage=safe_body["evidence_coverage"],
         workspace_id=safe_body["workspace_id"],
         workspace_binding=safe_body["workspace_binding"],
         snapshot_resolution=safe_body["snapshot_resolution"],
@@ -357,6 +589,9 @@ class OwnerOpportunityReadModel:
     opportunities: tuple[Mapping[str, Any], ...]
     blockers: tuple[str, ...]
     next_best_action: str
+    next_research_step: str
+    next_research_pillar: str | None
+    evidence_coverage: Mapping[str, Any]
     workspace_id: str | None
     workspace_binding: str
     snapshot_resolution: Mapping[str, Any]
@@ -375,6 +610,9 @@ class OwnerOpportunityReadModel:
             "opportunities": [dict(item) for item in self.opportunities],
             "blockers": list(self.blockers),
             "next_best_action": self.next_best_action,
+            "next_research_step": self.next_research_step,
+            "next_research_pillar": self.next_research_pillar,
+            "evidence_coverage": dict(self.evidence_coverage),
             "workspace_id": self.workspace_id,
             "workspace_binding": self.workspace_binding,
             "snapshot_resolution": dict(self.snapshot_resolution),
