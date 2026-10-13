@@ -4,6 +4,7 @@ Everything here is synthetic and offline. No test opens a socket, reads an envir
 credential. The live path is proven unreachable by blocking ``socket.socket``. Fixture
 ``tests/fixtures/ad_library/meta_ad_library_synthetic.json`` is invented; see docs/META_AD_LIBRARY_EVIDENCE.md.
 """
+
 from __future__ import annotations
 
 import ast
@@ -132,15 +133,15 @@ def test_active_record_maps_identity_status_geography_and_reference_fields():
     assert record.page_name == "Synthetic Kitchen Co"
     assert record.delivery_start == "2026-08-01T10:00:00+00:00"
     assert record.delivery_stop is None
-    assert record.delivery_status == "delivering"
+    assert record.delivery_status == "stop_time_absent"
     assert record.countries == ("US", "CA")
-    assert record.platforms == ("facebook", "instagram")
+    assert record.platforms == ("FACEBOOK", "INSTAGRAM")
     assert record.creative_excerpt == "Synthetic countertop organiser for small kitchens. Ships in two days."
     assert record.creative_excerpt_truncated is False
     assert record.snapshot_reference == "https://ads.example.invalid/render"
     assert record.record_status == "ok"
     assert record.field_status["delivery_status"] == "derived"
-    assert record.field_status["page_id"] == "observed"
+    assert record.field_status["page_id"] == "supplied_fixture"
 
 
 def test_ended_record_reports_both_dates_and_ended_status():
@@ -148,7 +149,7 @@ def test_ended_record_reports_both_dates_and_ended_status():
 
     assert record.delivery_start == "2026-07-15T08:00:00+00:00"
     assert record.delivery_stop == "2026-08-10T08:00:00+00:00"
-    assert record.delivery_status == "ended"
+    assert record.delivery_status == "stop_time_recorded"
 
 
 def test_timestamps_are_normalized_to_utc_and_naive_timestamps_are_malformed():
@@ -201,7 +202,12 @@ def test_stop_time_before_start_is_rejected_and_status_becomes_unavailable():
 
 
 def test_year_nine_thousand_timestamp_is_malformed_and_does_not_cost_the_valid_records():
-    valid = {"id": "900000013", "page_id": "100000013", "ad_reached_countries": ["US"], "ad_delivery_start_time": "2026-08-01T00:00:00+00:00"}
+    valid = {
+        "id": "900000013",
+        "page_id": "100000013",
+        "ad_reached_countries": ["US"],
+        "ad_delivery_start_time": "2026-08-01T00:00:00+00:00",
+    }
     extreme = {
         "id": "900000014",
         "page_id": "100000014",
@@ -221,7 +227,7 @@ def test_invalid_entries_are_dropped_from_lists_and_counted_as_partial():
     record = _record(_run(_fixture()), "900000005")
 
     assert record.countries == ("US",)
-    assert record.platforms == ("facebook",)
+    assert record.platforms == ("FACEBOOK",)
     assert "countries_partially_invalid" in record.warnings
     assert "platforms_partially_invalid" in record.warnings
     assert record.page_id is None
@@ -291,7 +297,12 @@ def test_invalid_country_is_rejected_before_any_record_is_read(country):
 
 
 def test_complete_response_with_no_matching_country_is_ok_not_partial():
-    entry = {"id": "900000030", "page_id": "100000030", "ad_reached_countries": ["US"], "ad_delivery_start_time": "2026-08-01T00:00:00+00:00"}
+    entry = {
+        "id": "900000030",
+        "page_id": "100000030",
+        "ad_reached_countries": ["US"],
+        "ad_delivery_start_time": "2026-08-01T00:00:00+00:00",
+    }
 
     report = _run(_body_response(entry), country="GB")
 
@@ -326,7 +337,12 @@ def test_window_bounds_are_inclusive_on_the_utc_start_day():
 
 
 def test_window_uses_the_utc_day_not_the_local_day_of_the_timestamp():
-    entry = {"id": "900000040", "page_id": "100000040", "ad_reached_countries": ["US"], "ad_delivery_start_time": "2026-08-01T23:30:00-05:00"}
+    entry = {
+        "id": "900000040",
+        "page_id": "100000040",
+        "ad_reached_countries": ["US"],
+        "ad_delivery_start_time": "2026-08-01T23:30:00-05:00",
+    }
 
     # 23:30 at -05:00 is 04:30 UTC on the next day, so the UTC day is 2026-08-02.
     local_day = _run(_body_response(entry), date_min="2026-08-01", date_max="2026-08-01")
@@ -336,7 +352,7 @@ def test_window_uses_the_utc_day_not_the_local_day_of_the_timestamp():
     assert dict(local_day.counts["dropped"]) == {"outside_date_window": 1}
     assert [record.ad_id for record in utc_day.records] == ["900000040"]
     assert utc_day.records[0].delivery_start == "2026-08-02T04:30:00+00:00"
-    assert utc_day.coverage["date_rule"] == "utc_calendar_day_of_delivery_start_inclusive"
+    assert utc_day.coverage["date_rule"] == "utc_calendar_day_of_supplied_delivery_start_inclusive"
 
 
 @pytest.mark.parametrize(
@@ -384,6 +400,55 @@ def test_policy_fields_are_reported_as_unavailable_and_listed_by_name_only():
         assert record.field_status[name] == "unavailable"
 
 
+def test_supplied_fixture_is_not_a_live_ad_or_performance_outcome():
+    entry = {
+        "id": "900000090",
+        "page_id": "100000090",
+        "page_name": "Synthetic Fixture Page",
+        "ad_creative_bodies": ["Synthetic fixture copy only."],
+        "ad_delivery_start_time": "2026-08-01T00:00:00+00:00",
+        "ad_reached_countries": ["DE"],
+        "publisher_platforms": ["FACEBOOK", "instagram", "not-a-meta-surface"],
+        "spend": {"lower_bound": "100", "upper_bound": "199"},
+        "impressions": "<1000",
+        "br_total_reach": 424242,
+        "eu_total_reach": 515151,
+        "bylines": "NotARealPayerName",
+        "currency": "EUR",
+        "target_ages": ["25-34"],
+        "estimated_audience_size": {"lower_bound": "1000", "upper_bound": "5000"},
+    }
+    report = _run(_body_response(entry), country="DE")
+    record = _record(report, "900000090")
+    rendered = json.dumps(report.to_dict())
+
+    assert record.platforms == ("FACEBOOK", "INSTAGRAM")
+    assert "platforms_partially_invalid" in record.warnings
+    assert record.delivery_status == "stop_time_absent"
+    assert record.delivery_status not in {"delivering", "ended", "live"}
+    assert set(record.field_status.values()).isdisjoint({"observed", "live", "verified"})
+    assert "424242" not in rendered
+    assert "515151" not in rendered
+    assert "NotARealPayerName" not in rendered
+    assert "EUR" not in rendered
+    for flag in (
+        "customer_attention",
+        "purchase_evidence",
+        "supplier_proof",
+        "targeting_activated",
+        "campaign_authority",
+        "performance_outcome",
+        "authenticated_observation",
+        "live_ad",
+        "publish",
+        "spend",
+        "launch",
+    ):
+        assert report.authority[flag] is False
+    assert report.source_status == "fixture_not_authenticated_observation"
+    assert report.access_method == "offline_fixture"
+
+
 def test_report_declares_the_unavailable_policy_fields_coverage_and_no_authority():
     report = _run(_fixture())
 
@@ -394,13 +459,28 @@ def test_report_declares_the_unavailable_policy_fields_coverage_and_no_authority
         "demographic_distribution",
         "estimated_audience_size",
         "eu_total_reach",
+        "br_total_reach",
+        "age_country_gender_reach_breakdown",
+        "beneficiary_payers",
+        "bylines",
+        "currency",
+        "total_reach_by_location",
         "target_ages",
         "target_gender",
         "target_locations",
     )
     assert all(value is False for value in report.authority.values())
+    assert report.authority["customer_attention"] is False
+    assert report.authority["purchase_evidence"] is False
+    assert report.authority["targeting_activated"] is False
+    assert report.authority["campaign_authority"] is False
+    assert report.authority["performance_outcome"] is False
+    assert report.authority["authenticated_observation"] is False
+    assert report.authority["live_ad"] is False
     assert report.retry_attempts_allowed == 0
-    assert report.coverage["coverage_statement"] == "not_verified_against_primary_documentation"
+    assert report.coverage["coverage_statement"] == "fixture_only_primary_docs_do_not_make_this_an_observation"
+    assert report.coverage["official_numeric_rate_limit"] == "not_stated_on_ads_archive_reference"
+    assert report.coverage["delivery_times_are"] == "advertiser_intent_not_live_delivery"
     assert report.coverage["pagination_followed"] is False
 
 
@@ -497,7 +577,9 @@ def test_unexpected_success_range_status_is_malformed():
 
 
 def test_record_limit_drops_only_the_overflow_and_says_so():
-    entries = [{"id": f"9{index:08d}", "ad_reached_countries": ["US"]} for index in range(contract.MAX_INPUT_RECORDS + 3)]
+    entries = [
+        {"id": f"9{index:08d}", "ad_reached_countries": ["US"]} for index in range(contract.MAX_INPUT_RECORDS + 3)
+    ]
 
     report = _run(_body_response(*entries))
 
@@ -717,7 +799,9 @@ def test_snapshot_reference_drops_query_fragment_and_rejects_user_information():
     assert kept.snapshot_reference == "https://ads.example.invalid/render/900000060"
 
     userinfo = _record(
-        _run(_body_response(_entry_with_copy("Synthetic.", ad_snapshot_url="https://user:secret@ads.example.invalid/x"))),
+        _run(
+            _body_response(_entry_with_copy("Synthetic.", ad_snapshot_url="https://user:secret@ads.example.invalid/x"))
+        ),
         "900000060",
     )
     assert userinfo.snapshot_reference is None
@@ -741,14 +825,20 @@ def test_snapshot_reference_drops_query_fragment_and_rejects_user_information():
     ],
 )
 def test_snapshot_paths_carrying_token_shapes_are_withheld_even_when_encoded(path):
-    record = _record(_run(_body_response(_entry_with_copy("Synthetic.", ad_snapshot_url="https://ads.example.invalid" + path))), "900000060")
+    record = _record(
+        _run(_body_response(_entry_with_copy("Synthetic.", ad_snapshot_url="https://ads.example.invalid" + path))),
+        "900000060",
+    )
 
     assert record.snapshot_reference is None
     assert "snapshot_reference_withheld" in record.warnings
 
 
 def test_snapshot_reference_must_be_https_and_absent_references_are_silent():
-    plain = _record(_run(_body_response(_entry_with_copy("Synthetic.", ad_snapshot_url="http://ads.example.invalid/x"))), "900000060")
+    plain = _record(
+        _run(_body_response(_entry_with_copy("Synthetic.", ad_snapshot_url="http://ads.example.invalid/x"))),
+        "900000060",
+    )
     assert plain.snapshot_reference is None
     assert plain.field_status["snapshot_reference"] == "malformed"
     assert "snapshot_reference_malformed" in plain.warnings
@@ -761,7 +851,11 @@ def test_snapshot_reference_must_be_https_and_absent_references_are_silent():
 
 def test_snapshot_www_hosts_are_kept_because_the_host_is_a_locator_not_text():
     record = _record(
-        _run(_body_response(_entry_with_copy("Synthetic.", ad_snapshot_url="https://www.facebook.com/ads/archive/render_ad/?id=1"))),
+        _run(
+            _body_response(
+                _entry_with_copy("Synthetic.", ad_snapshot_url="https://www.facebook.com/ads/archive/render_ad/?id=1")
+            )
+        ),
         "900000060",
     )
 
@@ -770,7 +864,10 @@ def test_snapshot_www_hosts_are_kept_because_the_host_is_a_locator_not_text():
 
 
 def test_snapshot_reference_with_control_characters_is_rejected():
-    record = _record(_run(_body_response(_entry_with_copy("Synthetic.", ad_snapshot_url="https://ads.example.invalid/x\x00y"))), "900000060")
+    record = _record(
+        _run(_body_response(_entry_with_copy("Synthetic.", ad_snapshot_url="https://ads.example.invalid/x\x00y"))),
+        "900000060",
+    )
 
     assert record.snapshot_reference is None
     assert "snapshot_reference_malformed" in record.warnings
@@ -787,7 +884,9 @@ def test_page_name_longer_than_the_limit_is_withheld_not_shortened():
 
 
 def test_page_name_with_contact_shape_is_withheld():
-    record = _record(_run(_body_response(_entry_with_copy("Synthetic.", page_name="Contact owner@example.invalid"))), "900000060")
+    record = _record(
+        _run(_body_response(_entry_with_copy("Synthetic.", page_name="Contact owner@example.invalid"))), "900000060"
+    )
 
     assert record.page_name is None
     assert "page_name_withheld" in record.warnings
@@ -848,7 +947,7 @@ def test_report_serializes_to_json_and_carries_the_source_contract():
     json.loads(json.dumps(payload))
 
     assert payload["source"] == "meta_ad_library_api"
-    assert payload["source_status"] == "candidate_primary_source_unverified"
+    assert payload["source_status"] == "fixture_not_authenticated_observation"
     assert payload["evidence_tier"] == "ad_transparency_offline_non_live"
     assert payload["access_method"] == "offline_fixture"
 
@@ -991,7 +1090,9 @@ def test_bridge_live_mode_is_blocked_and_opens_no_socket(monkeypatch):
 
 
 def test_bridge_live_mode_still_refuses_invalid_requests_without_echo():
-    report = bridge.fetch_ad_library_evidence("owner@example.invalid", country="US", context=_live(), observed_at=OBSERVED_AT)
+    report = bridge.fetch_ad_library_evidence(
+        "owner@example.invalid", country="US", context=_live(), observed_at=OBSERVED_AT
+    )
 
     assert report.response_status == "invalid_request"
     assert report.blockers == ("search_terms_withheld_sensitive",)
@@ -999,7 +1100,9 @@ def test_bridge_live_mode_still_refuses_invalid_requests_without_echo():
 
 @pytest.mark.parametrize("context", [_dry_run, _live])
 def test_bridge_refuses_unusable_observation_time_in_both_modes_without_raising(context):
-    report = bridge.fetch_ad_library_evidence("synthetic", country="US", context=context(), response=_fixture(), observed_at=10**400)
+    report = bridge.fetch_ad_library_evidence(
+        "synthetic", country="US", context=context(), response=_fixture(), observed_at=10**400
+    )
 
     assert report.response_status == "invalid_request"
     assert report.blockers == ("observed_at_invalid",)

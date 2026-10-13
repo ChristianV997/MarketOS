@@ -7,10 +7,11 @@ Status (see docs/META_AD_LIBRARY_EVIDENCE.md for the full record):
 - Dry-run: the bridge in backend.adapters.research.meta_ad_library.
 - Not integration-tested. Not live-validated. No provider has been called.
 
-Access requirements, terms, geography coverage, field availability and rate
-limits for the Meta Ad Library API were NOT verified against Meta's primary
-documentation in the session that wrote this module. This module maps only a
-response shape the caller supplies. It has no transport, reads no environment
+Access requirements, terms, geography, field availability and query limits were
+read from Meta's primary pages on 2026-10-13. See
+``docs/META_AD_LIBRARY_EVIDENCE.md``. This module still only maps a response
+shape the caller supplies. It is not an authenticated observation, not a live
+ad, and not a performance outcome. It has no transport, reads no environment
 variables, loads no credentials, and opens no sockets.
 
 Ad evidence describes public advertiser activity for research context. It is
@@ -18,10 +19,14 @@ not supplier proof, not product demand, and grants no publishing, spend, or
 launch authority.
 
 Field policy:
-- Spend, impressions, delivery-by-region, demographic, reach and targeting or
-  audience fields are never mapped or copied. They are reported as
-  ``unavailable``, even when a response carries them. Only the field names are
-  listed back.
+- A value parsed from the supplied payload is ``supplied_fixture``. That is not
+  a live or authenticated observation.
+- Spend, impressions, reach, demographic, delivery-by-region and targeting or
+  audience fields are never mapped or copied, including when Meta's reference
+  documents them as ranges or estimates. They are reported as ``unavailable``.
+  Only the field names are listed back. A range is not a performance outcome.
+- ``delivery_status`` names whether the supplied advertiser-intended stop time
+  is present. It does not say the ad is live or that delivery ended.
 - A field that is absent, malformed or out of scope is ``unavailable`` or
   ``malformed``. Nothing is inferred, estimated or defaulted.
 - Snapshot references keep scheme, host and path only. Query strings, fragments
@@ -31,6 +36,7 @@ Sanitization policy (fail-closed, not complete): see the documentation for the
 exact rules and the residual limits. Creative and advertiser text is withheld
 entirely, never partly redacted, when it matches any of those rules.
 """
+
 from __future__ import annotations
 
 import html
@@ -45,9 +51,25 @@ from typing import Any
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 SOURCE = "meta_ad_library_api"
-SOURCE_STATUS = "candidate_primary_source_unverified"
+SOURCE_STATUS = "fixture_not_authenticated_observation"
 EVIDENCE_TIER = "ad_transparency_offline_non_live"
 ACCESS_METHOD = "offline_fixture"
+SUPPLIED_FIXTURE = "supplied_fixture"
+
+# Documented publisher_platforms enum from Graph API ads_archive v26.0.
+# Stored in that canonical case. This is not evidence the ad was seen live.
+PUBLISHER_PLATFORMS = frozenset(
+    {
+        "FACEBOOK",
+        "INSTAGRAM",
+        "AUDIENCE_NETWORK",
+        "MESSENGER",
+        "WHATSAPP",
+        "OCULUS",
+        "THREADS",
+        "STREAMING_SERVICES",
+    }
+)
 
 # No transport exists, so no retry exists. A future transport PR must justify a non-zero value.
 MAX_RETRY_ATTEMPTS = 0
@@ -73,7 +95,8 @@ RESPONSE_STATUSES = (
 # Drops caused by the caller's filters. They are expected and do not make a response partial.
 FILTER_REASONS = frozenset({"country_not_in_reached_countries", "outside_date_window"})
 
-# Metrics and audience fields that this layer never maps. The scope that would permit them is unverified.
+# Official fields this layer never copies. Ranges and estimates are not outcomes.
+# See docs/META_AD_LIBRARY_EVIDENCE.md for which of these Meta restricts by ad type or geography.
 UNAVAILABLE_BY_POLICY = (
     "spend",
     "impressions",
@@ -81,6 +104,12 @@ UNAVAILABLE_BY_POLICY = (
     "demographic_distribution",
     "estimated_audience_size",
     "eu_total_reach",
+    "br_total_reach",
+    "age_country_gender_reach_breakdown",
+    "beneficiary_payers",
+    "bylines",
+    "currency",
+    "total_reach_by_location",
     "target_ages",
     "target_gender",
     "target_locations",
@@ -127,6 +156,13 @@ _AUTHORITY_VALUES = MappingProxyType(
         "supplier_proof": False,
         "product_demand": False,
         "decision_scoring": False,
+        "customer_attention": False,
+        "purchase_evidence": False,
+        "targeting_activated": False,
+        "campaign_authority": False,
+        "performance_outcome": False,
+        "authenticated_observation": False,
+        "live_ad": False,
     }
 )
 AUTHORITY = _ReadOnlyMapping(_AUTHORITY_VALUES)
@@ -135,7 +171,6 @@ _ISO_COUNTRY = re.compile(r"^[A-Z]{2}$")
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _NUMERIC_ID = re.compile(r"^\d{1,30}$")
 _AD_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
-_PLATFORM = re.compile(r"^[a-z_]{1,32}$")
 _HTML_TAG = re.compile(r"<[^>]{0,200}>")
 
 # Ten or more digits, separated by at most four non-word characters. Dash-grouped and slash-grouped numbers count.
@@ -277,8 +312,12 @@ def make_report(
                 "first_page_only": first_page_only,
                 "pagination_followed": False,
                 "geography_rule": "country_must_appear_in_ad_reached_countries",
-                "date_rule": "utc_calendar_day_of_delivery_start_inclusive",
-                "coverage_statement": "not_verified_against_primary_documentation",
+                "date_rule": "utc_calendar_day_of_supplied_delivery_start_inclusive",
+                "coverage_statement": "fixture_only_primary_docs_do_not_make_this_an_observation",
+                "official_search_terms_max_chars": MAX_SEARCH_TERMS_CHARS,
+                "official_search_page_ids_max": 10,
+                "official_numeric_rate_limit": "not_stated_on_ads_archive_reference",
+                "delivery_times_are": "advertiser_intent_not_live_delivery",
             }
         ),
         counts=_ReadOnlyMapping(
@@ -425,8 +464,12 @@ def _sanitize_text(value: Any, *, limit: int) -> tuple[str | None, bool, str | N
 def _instant(value: Any) -> datetime | None:
     if not isinstance(value, str) or len(value) > 40:
         return None
+    text = value.strip().replace("Z", "+00:00")
+    # Archived Ad examples use "+0000". fromisoformat accepts that offset only on Python 3.11+.
+    if len(text) >= 5 and text[-5] in "+-" and text[-4:].isdigit():
+        text = f"{text[:-2]}:{text[-2:]}"
     try:
-        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(text)
     except ValueError:
         return None
     if parsed.tzinfo is None:
@@ -487,8 +530,9 @@ def _platforms(value: Any) -> tuple[tuple[str, ...], int]:
     kept: list[str] = []
     invalid = 0
     for item in value:
-        if isinstance(item, str) and _PLATFORM.fullmatch(item):
-            kept.append(item)
+        platform_name = item.strip().upper() if isinstance(item, str) else ""
+        if platform_name in PUBLISHER_PLATFORMS:
+            kept.append(platform_name)
         else:
             invalid += 1
     return tuple(dict.fromkeys(kept)), invalid
@@ -551,14 +595,14 @@ def _map_record(
     if raw_page_id is None:
         page_id, field_status["page_id"] = None, "unavailable"
     elif isinstance(raw_page_id, str) and _NUMERIC_ID.fullmatch(raw_page_id):
-        page_id, field_status["page_id"] = raw_page_id, "observed"
+        page_id, field_status["page_id"] = raw_page_id, SUPPLIED_FIXTURE
     else:
         page_id, field_status["page_id"] = None, "malformed"
         warnings.append("page_id_malformed")
 
     page_name, truncated_name, withheld = _sanitize_text(item.get("page_name"), limit=MAX_PAGE_NAME_CHARS)
     if page_name is not None and not truncated_name:
-        field_status["page_name"] = "observed"
+        field_status["page_name"] = SUPPLIED_FIXTURE
     else:
         # A truncated advertiser name would be a different name, so it is withheld rather than shortened.
         page_name = None
@@ -570,7 +614,7 @@ def _map_record(
 
     start = _instant(item.get("ad_delivery_start_time"))
     if start is not None:
-        field_status["delivery_start"] = "observed"
+        field_status["delivery_start"] = SUPPLIED_FIXTURE
     elif item.get("ad_delivery_start_time") is None:
         field_status["delivery_start"] = "unavailable"
     else:
@@ -588,15 +632,16 @@ def _map_record(
         field_status["delivery_stop"] = "malformed"
         warnings.append("delivery_stop_before_start")
     else:
-        field_status["delivery_stop"] = "observed"
+        field_status["delivery_stop"] = SUPPLIED_FIXTURE
 
-    # A status needs a trustworthy start. A malformed stop leaves the state unknown, so it is not inferred either way.
+    # Blank stop is the advertiser's open-ended intent in Meta's field note, not proof the ad is live.
+    # A recorded stop is when the advertiser wants delivery to stop, not a measured end.
     if start is None or field_status["delivery_stop"] == "malformed":
         delivery_status = "unavailable"
     elif stop is not None:
-        delivery_status = "ended"
+        delivery_status = "stop_time_recorded"
     else:
-        delivery_status = "delivering"
+        delivery_status = "stop_time_absent"
     field_status["delivery_status"] = "derived" if delivery_status != "unavailable" else "unavailable"
 
     countries_result = _countries(item.get("ad_reached_countries"))
@@ -605,12 +650,12 @@ def _map_record(
         field_status["countries"] = "unavailable" if item.get("ad_reached_countries") is None else "malformed"
     else:
         countries, invalid_countries = countries_result
-        field_status["countries"] = "observed" if countries else "unavailable"
+        field_status["countries"] = SUPPLIED_FIXTURE if countries else "unavailable"
         if invalid_countries:
             warnings.append("countries_partially_invalid")
 
     platforms, invalid_platforms = _platforms(item.get("publisher_platforms"))
-    field_status["platforms"] = "observed" if platforms else "unavailable"
+    field_status["platforms"] = SUPPLIED_FIXTURE if platforms else "unavailable"
     if invalid_platforms:
         warnings.append("platforms_partially_invalid")
 
@@ -630,7 +675,7 @@ def _map_record(
     first_body = bodies[0] if isinstance(bodies, list) and bodies else None
     excerpt, truncated, withheld = _sanitize_text(first_body, limit=MAX_EXCERPT_CHARS)
     if excerpt is not None:
-        field_status["creative_excerpt"] = "observed"
+        field_status["creative_excerpt"] = SUPPLIED_FIXTURE
         if truncated:
             warnings.append("creative_excerpt_truncated")
     else:
@@ -640,7 +685,7 @@ def _map_record(
 
     snapshot, snapshot_warning = _snapshot_reference(item.get("ad_snapshot_url"))
     if snapshot is not None:
-        field_status["snapshot_reference"] = "observed"
+        field_status["snapshot_reference"] = SUPPLIED_FIXTURE
     else:
         field_status["snapshot_reference"] = "unavailable" if item.get("ad_snapshot_url") is None else "malformed"
         if snapshot_warning:
@@ -791,4 +836,6 @@ def build_ad_library_evidence(
             date_max=date_max,
         )
     except Exception:
-        return make_report("malformed_response", search_terms="", country="", observed_at=0.0, blockers=("offline_builder_failed",))
+        return make_report(
+            "malformed_response", search_terms="", country="", observed_at=0.0, blockers=("offline_builder_failed",)
+        )

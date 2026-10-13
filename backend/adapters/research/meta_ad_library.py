@@ -7,11 +7,14 @@ opens a socket. It returns ``blocked_live_mode`` and names every prerequisite th
 unmet. There is no live transport in this release.
 
 This module reads no environment variables, loads no credentials, and imports no HTTP
-client. The output is research context about public advertiser activity. It is not supplier
-proof, not product demand, and grants no publishing, spend, or launch authority.
+client. The output is research context about a supplied archive shape. It is not supplier
+proof, not product demand, not customer attention, not a purchase, and not
+campaign or targeting authority. Primary Meta pages were read on 2026-10-13;
+that reading does not make a fixture an authenticated observation.
 Ad evidence is deliberately not attached to ``ResearchCandidate.additional_evidence`` or
 any scorer.
 """
+
 from __future__ import annotations
 
 import logging
@@ -32,10 +35,11 @@ _log = logging.getLogger(__name__)
 # Every prerequisite a live request is missing today. Named explicitly, so a blocked result is never a bare refusal.
 LIVE_PREREQUISITES = (
     "approved Approval Ledger request (approval_request_type=provider_call)",
-    "developer identity verification and Meta app access (primary-source requirement, not verified here)",
-    "primary-source verification of Ad Library API access, terms, and commercial research use",
-    "geography coverage verified against primary documentation for the target country",
-    "field availability verified against primary reference; spend, impression and targeting scope kept unavailable",
+    "operator identity confirmation at facebook.com/ID and a Meta app, not performed by this module",
+    "primary-source verification remains incomplete for token type, numeric rate limit, result cap, and UK-only commercial return",
+    "operator acceptance of Platform Terms and the data-storage terms linked from the Ad Library API page, not accepted here",
+    "target-country coverage checked against both the API landing page and the ads_archive EU note before any query",
+    "spend, impression, reach, and targeting values stay unmapped; documented ranges are not performance outcomes",
     "credential reference configured (credential-meta-ad-library, secret value absent)",
     "rate-limit policy and retry budget defined for a real transport",
     "monthly or per-run call budget approved",

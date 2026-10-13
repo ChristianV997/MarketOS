@@ -1,6 +1,8 @@
 # Meta Ad Library advertiser-transparency evidence (offline contract)
 
-Status: **implemented and fixture-tested; dry-run bridge only.** Not integration-tested. Not live-validated. No provider has been called and no credential has been used.
+Status: **implemented and fixture-tested; dry-run bridge only.** Not integration-tested. Not live-validated. No provider has been called and no credential has been used. A fixture is not an authenticated observation and not a performance outcome.
+
+Primary pages read on **2026-10-13** (UTC). This reading does not authorize a live call.
 
 | Capability | State |
 |---|---|
@@ -8,67 +10,80 @@ Status: **implemented and fixture-tested; dry-run bridge only.** Not integration
 | Synthetic fixture and offline tests (`tests/test_meta_ad_library_evidence.py`) | Tested (synthetic only) |
 | Dry-run bridge (`backend/adapters/research/meta_ad_library.py`) | Dry-run |
 | Live transport | Not implemented |
-| Use in scoring, decisions, attention or supplier evidence | Not implemented, deliberately |
+| Use in scoring, attention, purchases, or supplier evidence | Not implemented, deliberately |
 
-## Source selection
+## Primary sources read
 
-The brief asked for Meta Ad Library to be evaluated first and, if it could not supply the required evidence under an official supported interface, for another official source to be selected. The primary documentation for every candidate was **not reachable** from this session. The egress policy returned HTTP 403 for `developers.facebook.com`, `www.facebook.com`, `developers.tiktok.com` and `adstransparency.google.com`. The proxy's guidance is not to route around a 403, so no alternative fetch path was used. Every claim below comes from secondary sources or from the repository's own records, and is labelled accordingly.
+| Page | What it is |
+|---|---|
+| [Ad Library API](https://www.facebook.com/ads/library/api) | Product page for access steps and what the API searches |
+| [Graph API ads_archive v26.0](https://developers.facebook.com/docs/graph-api/reference/ads_archive/) | Query parameters, error 613, Archived Ad edge |
+| [Graph API Archived Ad v26.0](https://developers.facebook.com/docs/graph-api/reference/archived-ad/) | Field list and per-field availability limits |
+| [Ad Library tools](https://transparency.meta.com/researchtools/ad-library-tools) | Transparency Center, updated Aug 24, 2023 |
+| [Platform Terms](https://developers.facebook.com/terms/) | Developer terms. Ad Library is not named |
+| [Meta Terms of Service](https://www.facebook.com/terms.php) | Linked by the API page for creative content and data storage. The storage clause body was not readable in this session |
+| [SIEP ad standards](https://transparency.meta.com/policies/ad-standards/SIEP-advertising/SIEP/) | Advertising policy, not the API query contract |
 
-| Candidate | Official interface | Access, as reported (secondary, unverified) | Required evidence | Decision |
-|---|---|---|---|---|
-| Meta Ad Library API (`ads_archive`, Graph API) | Yes, Meta | Developer account identity verification, a Meta app, and acceptance of Ad Library API terms. Reported approval times vary. | Commercial-ad page identity, dates, countries and creative text are reported as available. Spend, impressions and targeting are reported as limited to political and social-issue ads. Sources disagree on commercial coverage. | **First candidate, not yet verified.** Implemented as the offline contract. Activation is blocked until primary-source verification. |
-| TikTok Commercial Content Library and Research API | Yes, TikTok | Commercial Content Library reported as launched for European commercial content (2023). Research API reported as researcher-gated. | Unknown for the target geography. | Not implemented. Not verified. |
-| Google Ads Transparency Center | Web interface | One secondary guide states that no official API exists. A BigQuery dataset was mentioned but not confirmed. | — | Excluded. No official programmatic interface was confirmed, and scraping is prohibited. |
-| Meta Content Library | Yes, Meta | Researcher-gated, per one secondary source. | Unknown. | Not evaluated. |
+No undocumented endpoint was called. Meta was not called. Marketing API rate limits and Content Library rate limits are different products and are not applied here.
 
-Secondary sources consulted (search snippets only; none fetched):
-- Meta reference page surfaced by search: https://developers.facebook.com/docs/graph-api/reference/ads_archive/ (returned, text truncated, not fetched)
-- Third-party guides: https://www.admapix.com/blog/ad-intelligence/meta-ads-library-api-developers, https://metapi.io/compare/facebook-ad-library-api, https://www.hyperfx.ai/blog/meta-ad-library-api-scraper-guide, https://adligator.com/blog/meta-ad-library-api-competitor-monitoring
-- TikTok: https://techcrunch.com/2023/07/20/tiktok-ads-transparency/
-- EU DSA ad repositories: https://adlibrary.com/posts/eu-dsa-ad-repositories-developers, https://foundation.mozilla.org/documents/363/Full_Disclosure_Stress_Testing_Tech_Platforms_Ad_Repositories_3FepU2u.pdf
+## Confirmed versus unknown
 
-The guides disagree with each other on coverage, access and rate limits, and several are sold as data products. Treat them as leads only.
+Confirmed from the pages above:
 
-## Official access requirements (to verify, not verified)
+- Access, from the Ad Library API page: a Facebook account; identity and location confirmation at `facebook.com/ID` (the same process required to run ads about social issues, elections or politics; confirmation can take a few days); a Meta for Developers account that agrees to the Platform Policy; then **Access the API** and a new app. The documented example query includes an access token parameter. The FAQ question "Do I need an access token?" was listed, and its answer was not in the fetched page, so token type is not established.
+- Searchable scope, from that same page: ads about social issues, elections or politics delivered anywhere in the world during the past 7 years; ads of any type delivered to the United Kingdom or the European Union during the past year.
+- `ad_reached_countries` is required. The v26.0 parameter note says: "Ads that did not reach any location in the EU will only return if they are about social issues, elections or politics."
+- `search_terms` is at most 100 characters. `search_page_ids` accepts up to ten Page IDs. This offline layer enforces the 100-character search-term cap and does not run Page-ID search.
+- Error **613** means calls exceeded the rate limit. The ads_archive page does not state a numeric quota. The FAQ "What is the maximum number of ads a search can return?" was listed without an answer in the fetched page.
+- Creating, updating, and deleting an Archived Ad are not supported.
+- Individual ad creative (images and text) may be downloaded for analysis only, and must comply with the data-storage terms in the Terms of Service linked from the API page. The same page says a batch of archived ads cannot currently be downloaded.
+- `publisher_platforms` search enum: FACEBOOK, INSTAGRAM, AUDIENCE_NETWORK, MESSENGER, WHATSAPP, OCULUS, THREADS, STREAMING_SERVICES. This layer stores only those tokens, in that case.
+- Field limits on Archived Ad v26.0, which this layer still does **not** copy: `spend` and `impressions` are ranges and are available only for `POLITICAL_AND_ISSUE_ADS`; `delivery_by_region`, `demographic_distribution`, `bylines`, and `currency` are political-and-issue only; `eu_total_reach` and `beneficiary_payers` are EU-delivery only; `br_total_reach` is political-and-issue ads delivered to Brazil; `age_country_gender_reach_breakdown`, `target_ages`, `target_gender`, and `target_locations` are UK and EU delivery, plus political-and-issue ads delivered to Brazil; `total_reach_by_location` currently lists EU, BR, and UK. `estimated_audience_size` is described as an estimate of accounts meeting selected targeting and placement criteria. The search parameters that bound it are political-and-issue only; the field row itself does not repeat that limit.
+- `ad_delivery_start_time` is when an advertiser wants delivery to start, in UTC. `ad_delivery_stop_time` is when an advertiser wants delivery to stop. If it is blank, Meta says the ad will run until the advertiser stops it or spends the campaign budget. That is advertiser intent, not an observation that the ad is live.
+- Transparency Center (Aug 24, 2023): the Ad Library stores social-issue, election, and political ads for 7 years, active or inactive, and provides spend, reach, and funding entities for them. Ads that deliver an impression in the EU or associated territories are shown while active and archived for one year after the last impression. The API sentence on that page covers ads about social issues, elections or politics, and ads that deliver to the EU and associated territories. It does not mention the UK. Authorized users may also analyze active public branded content on Facebook and Instagram. This layer does not map branded content.
+- SIEP policy: ads about social issues, elections or politics are not allowed to run in the European Union, except ads containing information about the time, place, and manner of voting or voter registration when placed by election authorities in the EU. That is an advertising rule, not a statement of what the API returns.
+- Platform Terms section 3.a.iv prohibits selling, licensing, or purchasing Platform Data. Section 3.d requires deletion of Platform Data when keeping it is no longer necessary for a legitimate purpose consistent with those terms, unless law requires retention. Ad Library is not named.
 
-- Developer account identity verification, and possibly a stricter check for political-ad data. Reported as several days to two weeks.
-- A registered Meta developer app and a user access token. One guide says user tokens expire after 60 days.
-- Acceptance of Ad Library API terms. One guide calls them "Authorized Access to Public Information".
-- Rate limits reported as roughly 200 calls per hour per app, with higher quotas granted case by case. This is unverified. The offline layer allows **zero** retries, and it never reads a `Retry-After` value to schedule a call.
+Not established, and not collapsed into one rule:
 
-## Terms limitations (to verify)
+- Whether a UK-only commercial ad that never reached the EU is returned by `ads_archive`. The landing page lists UK-or-EU any-type ads during the past year. The parameter note names only the EU for the non-political return rule. Both sentences are confirmed. They are not the same sentence.
+- Whether "associated territories" (2023 Transparency Center) are inside the current landing page's "European Union", and whether "during the past year" is the same interval as "one year upon the delivery of their last impression".
+- Numeric rate limit, numeric result cap, token type, and the meaning of FAQ error 1357045.
+- Which clause of `facebook.com/terms.php` is the data-storage term. The page body was not readable here. Do not invent a retention period for copied creative.
+- Cost. None of the pages read states a price. Do not treat the API as free.
+- That the API returns commercial ads that reached neither the EU nor the UK and are not about social issues, elections, or politics. The landing page does not say that. The separate Ad Library website is described as a search of active ads; that is not this API.
+- Any performance outcome: clicks, conversions, purchases, ROAS, or exact spend. The documented spend and impression values are ranges, and only in the political-and-issue scope above.
 
-- Reported prohibition on using archive data to build ad-targeting or resale products, with token or app revocation as the enforcement risk.
-- Terms-review status in the repository's capability catalogue is recorded as `reviewed`. That record is not backed by a primary-source reading in this session, and its `commit_sha` is all zeros. Treat it as unverified.
-- The repository's OSS intake read the LICENSE of `facebookresearch/Ad-Library-API-Script-Repository` directly at a pinned commit. It is a Facebook API-connection grant, not an open-source license. Its verdict is `reference_only`: do not run it, send tokens, call the API, scrape, or store payloads. Nothing from it is used here.
+## What the fixture is allowed to mean
 
-## Geography coverage (unverified)
-
-The contract requires the queried country to appear exactly in `ad_reached_countries`. Records without any country are dropped. The layer makes **no** coverage claim, because sources disagree on whether commercial ads outside the EU and UK are returned. Coverage must be verified for each target country before any use.
+- `source_status` is `fixture_not_authenticated_observation`. `access_method` is `offline_fixture`.
+- A parsed field is `supplied_fixture`. It is never `observed`, `live`, or `verified`.
+- `delivery_status` is `stop_time_absent`, `stop_time_recorded`, or `unavailable`. It is not `delivering` or `ended`.
+- Authority flags stay false: publish, spend, launch, supplier proof, product demand, decision scoring, customer attention, purchase evidence, targeting activation, campaign authority, performance outcome, authenticated observation, and live ad.
+- Spend, impressions, reach, bylines, currency, and targeting values are removed even when the payload contains them. Their names may appear only as `unavailable`.
 
 ## Date window
 
 - `date_min` and `date_max` are inclusive `YYYY-MM-DD` bounds. A window whose start is later than its end is refused.
-- The rule compares the **UTC calendar day** of `ad_delivery_start_time`. Offsets are normalized first, so `2026-08-01T23:30:00-05:00` falls on `2026-08-02`. The rule is reported in `coverage.date_rule`.
+- The rule compares the **UTC calendar day** of the supplied `ad_delivery_start_time`. Offsets are normalized first, so `2026-08-01T23:30:00-05:00` falls on `2026-08-02`. The rule is reported in `coverage.date_rule`.
+- Meta documents that timestamp as advertiser-intended start, in UTC, with examples such as an offset written `+0000`. This layer accepts that offset and `Z`. The calendar-day comparison is still this layer's rule.
 - A record with no valid start is dropped with `date_unverifiable` when a window is given.
-- The provider's own date semantics are not verified. The UTC rule is this layer's choice, not a documented provider behaviour.
+
+## Geography filter in this layer
+
+The contract requires the queried country to appear exactly in `ad_reached_countries`. Records without any country are dropped. That filter does not claim the API will return commercial ads for that country. Coverage for a target country still has to be checked against both official statements above before any future query.
 
 ## Costs
 
-The capability catalogue says "free (with API access)". No pricing source was reached. Costs are unverified.
+Unknown. No pricing statement was on the pages read.
 
 ## Fields
 
-Working field set (from secondary sources, unverified against the primary reference):
+Mapped when present and valid, as `supplied_fixture` only: `id`, `page_id`, `page_name`, `ad_delivery_start_time`, `ad_delivery_stop_time`, `ad_reached_countries`, `publisher_platforms`, `ad_creative_bodies`, `ad_snapshot_url`.
 
-- Mapped when present and valid: `id`, `page_id`, `page_name`, `ad_delivery_start_time`, `ad_delivery_stop_time`, `ad_reached_countries`, `publisher_platforms`, `ad_creative_bodies`, `ad_snapshot_url`.
-- Never mapped or copied, even if a response contains them: `spend`, `impressions`, `delivery_by_region`, `demographic_distribution`, `estimated_audience_size`, `eu_total_reach`, `target_ages`, `target_gender`, `target_locations`. Each is reported as `unavailable` in `field_status`. Only the field names are listed back, in `policy_fields_present`.
+Never mapped or copied, even if a response contains them: every name in `UNAVAILABLE_BY_POLICY`. Each is `unavailable` in `field_status`. Only the field names are listed back, in `policy_fields_present`.
 
-Derived status (`delivery_status`):
-- `unavailable` when the start is absent or malformed, and also when the stop time is malformed or earlier than the start. A status is not inferred from a timeline that cannot be trusted.
-- `ended` when the start is valid and a valid stop time is present.
-- `delivering` when the start is valid and no stop time is present.
-- It describes the archive at observation time, not a live state.
+`ad_creation_time` is on the Archived Ad reference and is not mapped. It is not a performance metric.
 
 Duplicates: the first entry for an identifier that passes the caller's filters is kept. Later entries with the same identifier are dropped as `duplicate_id`. A filtered-out entry never shadows a valid one.
 
@@ -107,7 +122,9 @@ Other rules:
 
 ## Authority
 
-Every report declares `publish`, `spend`, `launch`, `supplier_proof`, `product_demand` and `decision_scoring` as `false`. Ad evidence is research context about public advertiser activity. It is not supplier proof, not product demand, and not a decision input.
+Every report sets these flags to `false`: `publish`, `spend`, `launch`, `supplier_proof`, `product_demand`, `decision_scoring`, `customer_attention`, `purchase_evidence`, `targeting_activated`, `campaign_authority`, `performance_outcome`, `authenticated_observation`, and `live_ad`.
+
+Ad-library evidence is not customer attention, not a purchase, not supplier proof, and not permission to activate targeting or a campaign. It does not feed `evaluation/commerce/consumer_attention.py`.
 
 ## Response status semantics
 
@@ -116,41 +133,33 @@ Every report declares `publish`, `spend`, `launch`, `supplier_proof`, `product_d
 - Filter drops do not make a response partial. A complete response with no record naming the queried country is `ok` with zero records.
 - `rate_limited`, `unavailable_access`, `upstream_unavailable`, `malformed_response`, `invalid_request`, `no_offline_response` and `blocked_live_mode` carry no records.
 - An unexpected exception inside the builder is caught and reported as `malformed_response` with the blocker `offline_builder_failed`. It is never raised to the caller.
+- `rate_limited` is a label for a supplied status. This layer does not retry and does not know Meta's numeric quota.
 
 ## What this adapter cannot establish
 
-- Spend, impressions, reach, demographics, targeting or audience size.
+- Exact spend, impressions, reach, demographics, targeting, or audience size. Documented ranges and estimates are not copied and are not performance outcomes.
 - Whether an advertiser is legitimate, or whether any ad converted, sold, or performed.
-- Completeness of coverage for any country or period, or whether the archive is complete for a query.
-- Current delivery state beyond the observation time. Snapshot references are not fetched, and their content is not verified.
-- Product demand, supplier capability, or any launch or spend decision.
-- Live availability of the provider, or the accuracy of any field name.
+- That a blank `ad_delivery_stop_time` means the ad is live, or that a recorded stop time means delivery has ended.
+- Completeness of coverage for any country or period. The UK landing-page sentence and the EU parameter note are not reconciled.
+- Snapshot contents. References are not fetched.
+- Product demand, supplier capability, customer attention, purchases, or any launch, spend, or targeting decision.
+- Live availability of the provider.
 - That every credential-shaped or contact-shaped string is withheld. See the sanitization limits above.
 
-## Live gate and verification
+## Gates before any future live collection
 
-The code gate is exactly `LIVE_PREREQUISITES` in `backend/adapters/research/meta_ad_library.py`. The bridge returns `blocked_live_mode` until a live transport exists, and it names every entry. The steps below are a documentation checklist. Code does not enforce them, and each must be completed before any activation is proposed.
+The code gate is exactly `LIVE_PREREQUISITES` in `backend/adapters/research/meta_ad_library.py`. The bridge returns `blocked_live_mode` and names every entry. There is still no transport. Do not add one until all of the following are true:
 
-Verification checklist (documentation only):
-1. Read the current Meta Ad Library API reference and its terms in full, from primary sources. Record the date and the URL of each reading.
-2. Confirm the access process, including identity verification and any political-ad-only gating. Record what a standard developer account can see.
-3. Confirm, per field, which are returned for commercial ads. Update the field policy only if the primary reference supports it. Keep spend, impressions and targeting unavailable unless scope explicitly permits them.
-4. Confirm the geography coverage for each target country, and any EU or UK disclosure coverage.
-5. Confirm rate limits, retry policy and the pagination contract. Correct the zero-retry assumption only with evidence.
-6. Confirm the cost model, if any is documented.
-7. Satisfy every entry of `LIVE_PREREQUISITES`:
-   - approved Approval Ledger request (approval_request_type=provider_call)
-   - developer identity verification and Meta app access (primary-source requirement, not verified here)
-   - primary-source verification of Ad Library API access, terms, and commercial research use
-   - geography coverage verified against primary documentation for the target country
-   - field availability verified against primary reference; spend, impression and targeting scope kept unavailable
-   - credential reference configured (credential-meta-ad-library, secret value absent)
-   - rate-limit policy and retry budget defined for a real transport
-   - monthly or per-run call budget approved
-   - privacy review of advertiser identity and creative excerpts complete
-   - output contract tests passing
-   - a separately reviewed live transport implementation
-8. Decide whether whitespace-split credentials need a dedicated scanner before any excerpt is stored or shown.
+1. An Approval Ledger `provider_call` approval exists for this provider.
+2. A human has completed `facebook.com/ID` confirmation and created the Meta app. This repository does not do that.
+3. The operator has accepted Platform Terms and the data-storage terms the Ad Library API page links. Acceptance is not recorded here. The unread `facebook.com/terms.php` storage clause still needs a human reading before any creative is stored.
+4. Token type, numeric rate limit, result cap, and error 1357045 are taken from a primary page that actually states them. Do not borrow Marketing API or Content Library quotas.
+5. The target country is checked against both the API landing page and the `ad_reached_countries` EU note. Do not treat UK-only commercial return as settled.
+6. Spend, impression, reach, and targeting values stay unmapped. A documented range is not a performance outcome and is not campaign authority.
+7. The credential reference is configured with the secret value absent. No environment variable is read by this layer.
+8. A retry budget and a monthly or per-run call budget are approved. This layer allows zero retries.
+9. Privacy review of advertiser identity and creative excerpts is complete, including whether whitespace-split credentials need a dedicated scanner before any excerpt is stored.
+10. Output contract tests pass, and a separate review approves a live transport. That transport is not this pull request.
 
 ## Residual risks in existing code (not modified)
 
