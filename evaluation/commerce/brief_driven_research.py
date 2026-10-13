@@ -708,6 +708,45 @@ def _call_with_timeout(client: Any, query: str, brief: ResearchBrief, timeout_s:
             return SourceCollectResult(status="unavailable", warnings=(f"client_error:{type(exc).__name__}",))
 
 
+_RESEARCH_STEP_PRIORITY = (
+    "not_configured",
+    "disabled_by_policy",
+    "quota_exhausted",
+    "timed_out",
+    "unavailable",
+    "partial",
+)
+_PILLAR_RESEARCH_ORDER = ("marketplace", "supplier", "consumer_attention")
+
+
+def choose_next_research_step(
+    outcomes: Mapping[str, SourceOutcome],
+    *,
+    synthesis_next_best_action: str = "",
+) -> str:
+    """Pick exactly one offline research step from explicit source statuses.
+
+    Missing or partial pillars outrank synthesis commercial advice. Planned
+    queries alone never satisfy a pillar.
+    """
+    by_status: dict[str, list[str]] = {status: [] for status in _RESEARCH_STEP_PRIORITY}
+    for pillar in _PILLAR_RESEARCH_ORDER:
+        outcome = outcomes.get(pillar)
+        if outcome is None:
+            by_status["unavailable"].append(pillar)
+            continue
+        if outcome.status == "collected" and outcome.record_count > 0:
+            continue
+        status = outcome.status if outcome.status in by_status else "unavailable"
+        by_status[status].append(pillar)
+    for status in _RESEARCH_STEP_PRIORITY:
+        pillars = by_status.get(status) or []
+        if pillars:
+            return f"supply_{pillars[0]}_offline_evidence:{status}"
+    action = _text(synthesis_next_best_action, 240)
+    return action or "review_synthesis_recommendation_offline"
+
+
 @dataclass
 class BriefDrivenResearchReport:
     report_version: str
@@ -725,6 +764,7 @@ class BriefDrivenResearchReport:
     mutated: bool = False
     live_provider_calls: bool = False
     next_best_action: str = ""
+    next_research_step: str = ""
     fingerprint: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -743,11 +783,15 @@ class BriefDrivenResearchReport:
             "limitations": list(self.limitations),
             "currency_notes": list(self.currency_notes),
             "execution_authorized": False,
+            "launch_authorized": False,
             "network_calls": False,
             "read_only": True,
             "mutated": False,
             "live_provider_calls": False,
+            "live_validated": False,
+            "evidence_mode": self.brief.evidence_mode,
             "next_best_action": self.next_best_action,
+            "next_research_step": self.next_research_step,
             "fingerprint": self.fingerprint,
             "requires_future_approval_or_credentials": [
                 "Approval Ledger human-approved provider policy before any live adapter",
@@ -883,6 +927,7 @@ def run_brief_driven_research(
             limitations = limitations + (f"{pillar}_status:{outcome.status}",)
 
     next_action = str(synthesis.get("next_best_action") or "review_source_statuses_and_supply_offline_evidence")
+    next_research_step = choose_next_research_step(outcomes, synthesis_next_best_action=next_action)
     fingerprint = hashlib.sha256(
         repr(
             (
@@ -890,6 +935,7 @@ def run_brief_driven_research(
                 {key: value.to_dict() for key, value in outcomes.items()},
                 synthesis.get("overall_recommendation"),
                 synthesis.get("top_candidate_id"),
+                next_research_step,
             )
         ).encode("utf-8")
     ).hexdigest()[:24]
@@ -905,6 +951,7 @@ def run_brief_driven_research(
         limitations=tuple(dict.fromkeys(limitations)),
         currency_notes=currency_notes,
         next_best_action=next_action,
+        next_research_step=next_research_step,
         fingerprint=fingerprint,
     )
 
@@ -941,6 +988,7 @@ def render_markdown(report: BriefDrivenResearchReport | Mapping[str, Any]) -> st
         f"Top candidate: `{synthesis.get('top_candidate_id') or 'none'}`",
         f"Recommendation: `{synthesis.get('overall_recommendation') or 'unavailable'}`",
         f"Confidence grade: `{synthesis.get('confidence_grade') or 'unavailable'}`",
+        f"Next research step: {_text(data.get('next_research_step'), 240)}",
         f"Next best action: {_text(data.get('next_best_action'), 240)}",
         "",
         "## Assumptions",
@@ -973,6 +1021,7 @@ __all__ = [
     "AuthorityGateResult",
     "BriefDrivenResearchReport",
     "derive_queries",
+    "choose_next_research_step",
     "evaluate_authority_gates",
     "build_default_fixture_clients",
     "run_brief_driven_research",

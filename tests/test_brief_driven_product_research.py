@@ -14,6 +14,7 @@ from evaluation.commerce.brief_driven_research import (
     FakeSupplierClient,
     ResearchBrief,
     StatusOnlyClient,
+    choose_next_research_step,
     derive_queries,
     evaluate_authority_gates,
     render_markdown,
@@ -495,27 +496,72 @@ def test_e2e_brief_through_canonical_plan_status_explicit_sources_and_synthesis(
         language="es",
         intended_buyer="home consumers",
         evidence_mode="fixture_demo",
+        max_candidates=1,
     )
     queries = derive_queries(brief)
     assert queries.query_plan["plan_version"] == "research-query-plan-v1"
     assert queries.to_dict()["planned_queries_are_evidence"] is False
+    assert queries.query_plan.get("live_validated") is False
+    assert queries.query_plan.get("launch_authorized") is False
     assert any(item["source_family"] == "marketplace" for item in queries.planned_queries)
     assert any(item["source_family"] == "supplier" for item in queries.planned_queries)
     assert any(item["source_family"] == "consumer_attention" for item in queries.planned_queries)
 
-    market, supplier, _attention = _success_clients(brief)
-    # Keep marketplace+supplier collected; attention explicitly missing (not zero/favorable).
+    # Mixed-currency supplier vs marketplace: sell prices must stay omitted (no FX).
+    market_rows = (
+        {
+            "candidate_id": queries.candidate_id,
+            "query": queries.marketplace_query,
+            "marketplace": "amazon",
+            "source_type": "amazon_best_sellers_snapshot",
+            "price": 899.0,
+            "currency": "MXN",
+            "review_count": 40,
+            "rating": 4.1,
+            "field_provenance": {"price": "fixture"},
+        },
+        {
+            "candidate_id": "extra-blender",
+            "query": queries.marketplace_query,
+            "marketplace": "amazon",
+            "source_type": "amazon_best_sellers_snapshot",
+            "price": 999.0,
+            "currency": "MXN",
+            "review_count": 12,
+            "rating": 3.9,
+            "field_provenance": {"price": "fixture"},
+        },
+    )
+    supplier_rows = (
+        {
+            "candidate_id": queries.candidate_id,
+            "query": queries.supplier_query,
+            "supplier": "cj",
+            "source_type": "fixture_demo",
+            "unit_cost": 12.0,
+            "currency": "USD",
+            "shipping_cost": 3.0,
+            "shipping_currency": "USD",
+            "inventory_quantity": 80,
+            "inventory_status": "in_stock",
+            "destination_region": brief.target_region,
+            "field_provenance": {"unit_cost": "fixture"},
+        },
+    )
     report = run_brief_driven_research(
         brief,
-        marketplace_client=market,
-        supplier_client=supplier,
+        marketplace_client=FakeMarketplaceClient(rows=market_rows),
+        supplier_client=FakeSupplierClient(rows=supplier_rows),
         attention_client=StatusOnlyClient("unavailable", "consumer_attention"),
     )
     payload = report.to_dict()
 
     assert payload["execution_authorized"] is False
+    assert payload["launch_authorized"] is False
+    assert payload["live_validated"] is False
     assert payload["live_provider_calls"] is False
     assert payload["network_calls"] is False
+    assert payload["evidence_mode"] == "fixture_demo"
     assert payload["derived_queries"]["planned_queries_are_evidence"] is False
     assert payload["derived_queries"]["query_plan"]["authority"] == "query_planning_only"
     assert payload["source_outcomes"]["marketplace"]["status"] == "collected"
@@ -526,16 +572,51 @@ def test_e2e_brief_through_canonical_plan_status_explicit_sources_and_synthesis(
     assert "missing_evidence_not_treated_as_zero_or_positive" in " ".join(
         payload["source_outcomes"]["consumer_attention"]["warnings"]
     )
+    # Planned query strings are not counted as collected evidence rows.
+    planned_texts = {item["query_text"] for item in payload["derived_queries"]["planned_queries"]}
+    assert planned_texts
+    assert payload["source_outcomes"]["consumer_attention"]["record_count"] == 0
+    assert payload["source_outcomes"]["marketplace"]["record_count"] == 1  # max_candidates
+    assert "target_sell_prices_omitted_due_to_currency_mismatch" in " ".join(
+        payload["source_outcomes"]["supplier"]["assumptions"]
+    )
+    assert "currencies_are_not_converted" in " ".join(payload["currency_notes"])
     assert payload["synthesis"] is not None
     assert payload["synthesis"].get("report_version")
     assert payload["next_best_action"]
+    assert payload["next_research_step"] == "supply_consumer_attention_offline_evidence:unavailable"
     assert payload["authority"]["provider_pull_authorized"] is False
-    # Candidate identity preserved from brief slug through planned collection queries.
     assert payload["derived_queries"]["candidate_id"] == "portable-blender"
     market_q = payload["derived_queries"]["marketplace_query"].casefold()
     assert "portable blender" in market_q or "licuadora" in market_q
     assert payload["derived_queries"]["marketplace_query"] != payload["derived_queries"]["supplier_query"]
     assert all(item.get("is_evidence") is False for item in payload["derived_queries"]["planned_queries"])
+    assert all(item.get("is_collected_evidence") is False for item in payload["derived_queries"]["planned_queries"])
+    # Fixture/manual never upgraded to live on pillar reports.
+    for pillar, outcome in payload["source_outcomes"].items():
+        mode = str(outcome["evidence_mode"] or "")
+        assert mode in {"fixture", "fixture_demo", "manual_import"}
+        assert "live" not in mode
+        if pillar == "consumer_attention":
+            assert outcome["empty_placeholder_report"] is True
+    rendered = render_markdown(report)
+    assert "Next research step:" in rendered
+    assert "supply_consumer_attention_offline_evidence:unavailable" in rendered
+
+
+def test_choose_next_research_step_prefers_missing_pillar():
+    brief = _brief()
+    market, supplier, attention = _success_clients(brief)
+    report = run_brief_driven_research(
+        brief,
+        marketplace_client=StatusOnlyClient("not_configured", "marketplace"),
+        supplier_client=supplier,
+        attention_client=attention,
+    )
+    assert report.next_research_step == "supply_marketplace_offline_evidence:not_configured"
+    assert choose_next_research_step(report.source_outcomes, synthesis_next_best_action="ignore_me").startswith(
+        "supply_marketplace_offline_evidence"
+    )
 
 
 def test_brief_validation_requires_core_fields():

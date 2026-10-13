@@ -77,10 +77,21 @@ present in synthesis thresholds.
 - Resource Execution Governor budgets/quotas for provider pulls
 
 Simulated or offline approval in this runner does **not** authorize live calls.
-`execution_authorized` remains `false`.
+`execution_authorized`, `launch_authorized`, and `live_validated` remain `false`.
+Fixture or manual evidence modes are never upgraded to live.
+
+## Offline integration path
+
+`brief → services.research_query_plan → status-explicit pillar clients → Product Opportunity Synthesis → next_research_step`
+
+`next_research_step` is exactly one offline action: the highest-priority missing or
+partial pillar (`not_configured` … `partial`), else the synthesis recommendation.
+Planned query variants stay `is_evidence=false` and never satisfy a pillar.
 
 ## Safety
 
 - Default: fixture/fake clients only
 - No credential reads, provider network calls, customer PII, raw payload persistence,
   scheduling, API routes, or frontend changes in this lane
+- Dependency: the canonical planner lives in PR #481 (`services/research_query_plan`);
+  this runner imports it and does not copy its lexicon
