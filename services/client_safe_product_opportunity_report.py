@@ -128,7 +128,9 @@ def _coverage_reference_view(value: Any) -> dict[str, Any] | None:
     for field in ("evidence_class", "freshness"):
         text = _bounded_coverage_text(value.get(field))
         projected[field] = text if text is not None else "unknown"
-    projected["conflicting"] = value.get("conflicting") is True
+    conflicting = value.get("conflicting")
+    if isinstance(conflicting, bool):
+        projected["conflicting"] = conflicting
     if not any(field in projected for field in ("evidence_id", "source_type", "source_ref")):
         return None
     return projected

@@ -118,7 +118,7 @@ def test_coverage_projection_allowlists_nested_fields_and_bounds_references(
             "evidence_class": "fixture",
             "freshness": "current",
             "status": "observed_fact",
-            "conflicting": False,
+            **({} if index == 0 else {"conflicting": False}),
             "internal_formula": "hidden",
         }
         for index in range(40)
@@ -138,6 +138,7 @@ def test_coverage_projection_allowlists_nested_fields_and_bounds_references(
     assert "internal_prompt" not in marketplace
     assert "unexpected_nested" not in candidate["evidence_coverage"]
     assert all("internal_formula" not in reference for reference in marketplace["evidence_refs"])
+    assert "conflicting" not in marketplace["evidence_refs"][0]
     assert "sk_live_nested_canary" not in json.dumps(result.to_dict(), sort_keys=True)
     assert result.export.payload["evidence_required"][0]["evidence_coverage"] == candidate["evidence_coverage"]
 
