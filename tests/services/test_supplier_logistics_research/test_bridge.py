@@ -201,3 +201,66 @@ def test_missing_logistics_facts_stay_unknown_and_blocked(offer_factory):
     }
     assert any("logistics: evidence is missing" in blocker for blocker in report.blockers)
     assert any("shipping_cost: evidence is missing" in blocker for blocker in report.blockers)
+
+
+def test_normalized_cj_candidate_record_reaches_canonical_landed_cost_report(offer_factory):
+    from backend.adapters.research.supplier_feasibility import normalize_record
+
+    row = {
+        "candidate_id": "candidate-espresso-1",
+        "query": "Portable Espresso Maker",
+        "supplier": "cj",
+        "source_type": "cj_readonly_fixture",
+        "evidence_mode": "fixture",
+        "supplier_product_id": "cj-variant-1",
+        "supplier_title": "Portable Espresso Maker",
+        "supplier_sku": "CJ-ESP-1-BLK",
+        "moq": 2,
+        "unit_cost": 12.5,
+        "currency": "USD",
+        "shipping_cost": 4.71,
+        "shipping_currency": "USD",
+        "delivery_min_days": 2,
+        "delivery_max_days": 5,
+        "inventory_status": "in_stock",
+        "inventory_quantity": 37,
+        "warehouse_region": "United States Warehouse",
+        "destination_region": "US",
+        "fulfillment_method": "supplier_shipped",
+        "field_provenance": {
+            "unit_cost": "fixture",
+            "shipping_cost": "fixture",
+            "moq": "fixture",
+            "inventory_quantity": "fixture",
+            "delivery_min_days": "fixture",
+            "delivery_max_days": "fixture",
+        },
+        "observed_at": "2027-01-15T08:00:00Z",
+        "warnings": ["supplier_reliability_unknown_until_fulfillment_outcomes"],
+    }
+    record = normalize_record(row, default_supplier="cj", default_source_type="cj_readonly_fixture", mode="fixture")
+    assert record is not None
+
+    report = build_report_from_supplier_evidence(
+        record,
+        target_price=Money("50", "USD", source="operator_input", provenance="assumed", evidence_state="assumed"),
+        generated_at=GENERATED_AT,
+    )
+
+    assert report.candidate_id == "candidate-espresso-1"
+    assert len(report.landed_cost_scenarios) == 3
+    assert report.offer.quoted_price is not None
+    assert report.offer.quoted_price.currency == "USD"
+    assert report.offer.goods is not None
+    assert report.offer.goods.shipping.supplier_shipping is not None
+    assert report.offer.goods.shipping.supplier_shipping.amount == Decimal("4.71")
+    assert report.offer.goods.moq_availability.minimum_order_quantity == 2
+    assert report.offer.goods.moq_availability.available_quantity == 37
+    assert report.offer.goods.lead_time.minimum_days == 2
+    assert report.offer.goods.lead_time.maximum_days == 5
+    assert report.offer.goods.fulfillment_mode == "unknown"
+    evidence_ref = report.offer.goods.supplier_evidence.evidence_ref
+    assert evidence_ref is not None
+    assert evidence_ref.origin == "United States Warehouse"
+    assert evidence_ref.destination == "US"
+    assert evidence_ref.human_confirmed is False
