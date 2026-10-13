@@ -70,8 +70,20 @@ def test_packet_is_fixture_only_and_secret_free():
 
 def test_known_gaps_are_exactly_the_observed_failures_and_none_is_unexpected():
     report = _full_report()
-    assert report["checks"]["unexpected_fail"] == 0
-    assert report["aggregate"]["unexpected_failures"] == []
+    expected_hard_failures = {
+        ("S04_cross_currency_join", "currency_safety_invariant"),
+        ("S09_identity_variant_mismatch", "identity_safety_invariant"),
+    }
+    unexpected = {
+        (scenario["id"], check["name"])
+        for scenario in report["scenarios"]
+        for check in scenario["checks"]
+        if check["status"] == "unexpected_fail"
+    }
+    assert unexpected == expected_hard_failures
+    assert set(report["aggregate"]["unexpected_failures"]) == {
+        f"{scenario}:{check}" for scenario, check in expected_hard_failures
+    }
     observed = {
         (scenario["id"], check["name"])
         for scenario in report["scenarios"]
@@ -80,6 +92,22 @@ def test_known_gaps_are_exactly_the_observed_failures_and_none_is_unexpected():
     }
     documented = {(gap["scenario"], name) for gap in report["known_gaps"] for name in gap["checks"]}
     assert observed == documented
+
+
+@pytest.mark.parametrize(
+    ("scenario_id", "check_name"),
+    [
+        ("S04_cross_currency_join", "currency_safety_invariant"),
+        ("S09_identity_variant_mismatch", "identity_safety_invariant"),
+    ],
+)
+def test_high_impact_join_invariants_cannot_be_documented_away(scenario_id, check_name):
+    report = harness.evaluate_packet(harness.load_packet(), only={scenario_id})
+    scenario = report["scenarios"][0]
+    check = next(item for item in scenario["checks"] if item["name"] == check_name)
+
+    assert check["status"] == "unexpected_fail"
+    assert report["checks"]["unexpected_fail"] == 1
 
 
 def test_report_is_deterministic_across_runs_on_a_bounded_subset():

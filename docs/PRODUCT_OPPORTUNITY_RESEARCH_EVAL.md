@@ -27,8 +27,10 @@ python scripts/evaluate_product_opportunity_research.py --scenario S04_cross_cur
 python scripts/evaluate_product_opportunity_research.py --output <path>
 ```
 
-- Exit `0`: no unexpected failures. Known gaps do not fail the run.
-- Exit `2`: at least one expectation failed and no gap documents it.
+- Exit `0`: no unexpected failures and no hard safety invariant failed.
+- Exit `2`: at least one expectation failed without an allowed gap, or a hard
+  safety invariant failed. Hard safety failures cannot be documented away by
+  `known_gaps`.
 - A full run takes about 20 seconds, almost all of it interpreter startup and
   imports. It reads the packet and the referenced fixtures, and it writes a file
   only when `--output` is given.
@@ -68,8 +70,11 @@ assumptions, or alias notes. A caution counts only when it equals one of a fixed
 set of exact codes for its category; matching is never by substring. The
 `band` dictionary is excluded, because its `currency` key is a label, not a
 caution. The synthesis emits no currency, identity, freshness, or price codes
-today, so those checks are known gaps. The economics-missing codes count as
-incomplete-evidence cautions only when a supplier pillar is present, because
+today, so the ordinary caution checks remain known gaps. Currency and identity
+also have mandatory safety checks that cannot be suppressed: an unreconciled
+currency or cross-pillar identity conflict must not produce an advance/ready
+recommendation. The economics-missing codes count as incomplete-evidence
+cautions only when a supplier pillar is present, because
 the synthesis emits them whenever the supplier is absent.
 
 ## Expectations
@@ -82,13 +87,21 @@ are safety policy written before the run. They are not canonical thresholds.
 - `max_grade`: the confidence grade must not exceed a ceiling.
 - `required_blockers`, `assumptions_must_include`: named cautions must appear.
 - `*_flagged`: when the harness measures a currency, identity, freshness, price, or incomplete-evidence problem, the output must carry a caution for it.
+- `currency_safety_invariant` and `identity_safety_invariant`: when those
+  conflicts are measured, an `advance_to_launch_draft` or `ready`
+  recommendation is always an unexpected failure; packet `known_gaps` cannot
+  waive these checks.
 - `pillar_warnings_surfaced`: input warnings must appear in the output.
 - `retained_candidates`, `min_alias_notes`, `expected_coverage`: structural checks.
 - `non_authorization`: always checked. Outputs must be read-only, network-free, and non-mutating, and the next action must be a non-executing code. The `read_only`, `network_calls`, and `mutated` values are constants the synthesis reports about itself, so they are weak evidence on their own. The real mutation guard is an input snapshot, taken before measurement and compared again after the synthesis runs. A test forces a mutating synthesis and expects the run to fail.
 
 A check that passes, or does not apply, is not reported as a gap. A failing
 check is reported as a known gap only when the packet names that exact scenario
-and check, with a reason. Any other failure is unexpected and fails the run.
+and check, with a reason, except for `currency_safety_invariant` and
+`identity_safety_invariant`. Those two checks are mandatory: mismatched
+currencies or cross-pillar identity conflicts must never yield an advance or
+ready recommendation, even while the underlying synthesis gap remains under
+its owning lane.
 
 ## Baseline and final results
 
@@ -106,10 +119,10 @@ Final, with 12 scenarios:
 
 | Measure | Value |
 |---|---|
-| Checks applicable | 85 (65 not applicable) |
+| Checks applicable | 87 (65 not applicable) |
 | Pass | 72 |
 | Known gap | 13 |
-| Unexpected failures | 0 |
+| Unexpected failures | 2 |
 | Pillars supplied (mean) | 2.83 |
 | Completeness (mean) | 0.977 |
 | Freshness | fresh 9, stale 1, unavailable 1, unrepresented 27 |
@@ -125,13 +138,16 @@ the mutation guard compared the synthesis input against a copy it never touched;
 caution matching was by substring and could be satisfied by unrelated codes; an
 unknown `--scenario` id ran zero scenarios and exited 0; unknown expectation keys
 and gap check names were not rejected; and a source with partly unavailable
-observations was classed as fresh. The corrected run produces the same numbers
-as before, and 30 tests cover the corrections.
+observations was classed as fresh. The corrected run preserves the prior
+measurements while adding two mandatory failures for the currently unsafe
+cross-currency and variant-identity joins; 32 tests cover the evaluator and
+its hard guards.
 
 The sequence was: the baseline run; then the new scenarios with empty known
 gaps, which produced 13 unexpected failures; then the known gaps, each recorded
-with its reason and synthesis line reference; then the final run with 0
-unexpected. The first pass also found a harness bug: an incomplete-evidence token
+with its reason and synthesis line reference. The final run retains the 13
+documented observations and surfaces two non-suppressible safety failures. The
+first pass also found a harness bug: an incomplete-evidence token
 matched an ordinary assumption, so one check passed vacuously. The token was
 narrowed and a regression test was added. No expectation was changed.
 

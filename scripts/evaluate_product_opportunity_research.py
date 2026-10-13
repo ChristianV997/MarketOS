@@ -50,6 +50,8 @@ NON_EXECUTING_ACTIONS = frozenset({
     "operator_review_evidence_matrix",
     DRAFT_ACTION,
 })
+NON_ADVANCING_RECOMMENDATIONS = frozenset({ADVANCE, "ready"})
+HARD_SAFETY_CHECKS = frozenset({"currency_safety_invariant", "identity_safety_invariant"})
 # A caution counts only when it is one of these exact codes. The synthesis emits none of the
 # currency, identity, freshness, or price codes today, so those checks are known gaps. Matching is
 # by equality, never substring: an unrelated code cannot satisfy a category by accident.
@@ -355,6 +357,22 @@ def run_checks(expect: dict[str, Any], metrics: dict[str, Any], out: dict[str, A
             checks.append(_check(f"{category}_flagged", flagged, f"{category} observations={count}"))
         else:
             checks.append(_check(f"{category}_flagged", None, "not_applicable"))
+    if metrics["currency_unreconciled"]:
+        checks.append(
+            _check(
+                "currency_safety_invariant",
+                out["overall_recommendation"] not in NON_ADVANCING_RECOMMENDATIONS,
+                f"currency_conflicts={metrics['currency_unreconciled']} recommendation={out['overall_recommendation']}",
+            )
+        )
+    if metrics["identity_conflicts"]:
+        checks.append(
+            _check(
+                "identity_safety_invariant",
+                out["overall_recommendation"] not in NON_ADVANCING_RECOMMENDATIONS,
+                f"identity_conflicts={metrics['identity_conflicts']} recommendation={out['overall_recommendation']}",
+            )
+        )
     if metrics["pillar_warnings"]:
         missing = [item for item in metrics["pillar_warnings"] if not _surfaced(item, strings)]
         checks.append(_check("pillar_warnings_surfaced", not missing, f"unsurfaced={missing}" if missing else "surfaced"))
@@ -419,7 +437,7 @@ def evaluate_packet(packet: dict[str, Any], *, only: set[str] | None = None) -> 
                 tallies["pass"] += 1
             else:
                 gap_id = gaps.get((scenario["id"], check["name"]))
-                if gap_id:
+                if gap_id and check["name"] not in HARD_SAFETY_CHECKS:
                     entry["status"] = "known_gap"
                     entry["gap"] = gap_id
                     tallies["known_gap"] += 1
