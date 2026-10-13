@@ -1,0 +1,11 @@
+{
+  "fixture_id": "trends-interest-raw-payload-rejected-v1",
+  "fixture_mode": true,
+  "provider_id": "google_trends_official",
+  "request_kind": "interest_over_time",
+  "raw_payload": {"response_body": "<html><body>provider dump</body></html>"},
+  "terms": ["desk fan"],
+  "geography": "US",
+  "language": "en",
+  "series": []
+}

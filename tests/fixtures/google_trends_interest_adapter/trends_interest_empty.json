@@ -1,0 +1,13 @@
+{
+  "fixture_id": "trends-interest-empty-v1",
+  "fixture_mode": true,
+  "provider_id": "google_trends_official",
+  "request_kind": "interest_over_time",
+  "terms": ["obscure product xyz"],
+  "geography": "US",
+  "language": "en",
+  "time_resolution": "MONTH",
+  "window_start": "2024-01-01",
+  "window_end": "2024-06-30",
+  "series": []
+}
