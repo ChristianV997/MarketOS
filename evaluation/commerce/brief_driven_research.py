@@ -12,7 +12,7 @@ import hashlib
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping, Protocol
 
 from backend.adapters.research.consumer_attention import normalize_record as normalize_attention
@@ -26,6 +26,7 @@ from evaluation.companyos.resource_execution_governor import (
     ExecutionDecisionRequest,
     evaluate_execution_request,
 )
+from services.research_query_plan import build_research_query_plan
 
 REPORT_VERSION = "brief-driven-product-research-v1"
 
@@ -90,11 +91,21 @@ class ResearchBrief:
 
 @dataclass(frozen=True)
 class DerivedQueries:
+    """Collection queries plus the canonical offline query plan.
+
+    ``marketplace_query`` / ``supplier_query`` / ``attention_query`` are the
+    primary strings used for fixture/fake collection. ``planned_queries`` and
+    ``query_plan`` come from ``services.research_query_plan`` and are labeled
+    as plans only — never collected evidence or demand proof.
+    """
+
     candidate_id: str
     marketplace_query: str
     supplier_query: str
     attention_query: str
     notes: tuple[str, ...] = ()
+    planned_queries: tuple[Mapping[str, Any], ...] = ()
+    query_plan: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -103,6 +114,9 @@ class DerivedQueries:
             "supplier_query": self.supplier_query,
             "attention_query": self.attention_query,
             "notes": list(self.notes),
+            "planned_queries": [dict(item) for item in self.planned_queries],
+            "query_plan": dict(self.query_plan),
+            "planned_queries_are_evidence": False,
         }
 
 
@@ -298,24 +312,90 @@ class StatusOnlyClient:
         return SourceCollectResult(status=self.status, warnings=(f"{self.pillar}_{self.status}",))
 
 
+def _map_buyer_intent(intended_buyer: str) -> str:
+    """Map free-text buyer persona onto the planner's bounded buyer intents."""
+    text = _text(intended_buyer, 160).casefold()
+    if any(token in text for token in ("reseller", "dropship", "revendedor")):
+        return "reseller"
+    if any(token in text for token in ("business", "b2b", "commercial", "oficina", "office")):
+        return "business"
+    if any(token in text for token in ("consumer", "customer", "home", "casa", "barista", "personal")):
+        return "consumer"
+    return "unknown"
+
+
+def _primary_collection_query(plan_queries: list[Any], family: str, *, fallback: str) -> str:
+    """Pick one collection string per family from the canonical plan.
+
+    Prefer a family_modifier / buyer_intent row so pillars stay distinct, then
+    any non-original variant, then the preserved original. Never treats the
+    plan row as collected evidence.
+    """
+    family_rows = [item for item in plan_queries if getattr(item, "source_family", None) == family]
+    for tag in ("family_modifier", "buyer_intent"):
+        for item in family_rows:
+            if tag in getattr(item, "tags", ()):
+                return item.query_text
+    for item in family_rows:
+        if not item.is_original:
+            return item.query_text
+    for item in family_rows:
+        if item.is_original:
+            return item.query_text
+    return fallback
+
+
 def derive_queries(brief: ResearchBrief) -> DerivedQueries:
-    """Derive pillar queries from the brief without requiring URLs or CSVs."""
+    """Compose pillar collection queries via ``services.research_query_plan``.
+
+    This runner does not maintain a second lexicon or planner. Planned variants
+    are attached as plans only (`is_evidence=false`).
+    """
     product = _text(brief.product_query, 160)
-    category = _text(brief.category, 120)
-    region = _text(brief.target_region, 80)
-    buyer = _text(brief.intended_buyer, 120)
-    language = _text(brief.language, 32)
     candidate_id = _slug(product)
-    marketplace_query = f"{product} {category} {region}".strip()
-    supplier_query = f"{product} supplier {region}".strip()
-    attention_query = f"{product} for {buyer} {language}".strip()
+    plan = build_research_query_plan(
+        {
+            "product_query": product,
+            "category": _text(brief.category, 120),
+            "region": _text(brief.target_region, 80),
+            "language": _text(brief.language, 32),
+            "intended_buyer": _map_buyer_intent(brief.intended_buyer),
+        }
+    )
+    plan_dict = plan.to_dict()
+    planned_queries = tuple(
+        {
+            **item.to_dict(),
+            "role": "plan",
+            "is_plan": True,
+            "is_evidence": False,
+            "is_collected_evidence": False,
+        }
+        for item in plan.queries
+    )
+    marketplace_query = _primary_collection_query(list(plan.queries), "marketplace", fallback=product)
+    supplier_query = _primary_collection_query(list(plan.queries), "supplier", fallback=product)
+    attention_query = _primary_collection_query(list(plan.queries), "consumer_attention", fallback=product)
     notes = (
-        "queries_derived_from_research_brief_only",
+        "queries_composed_from_services_research_query_plan",
+        "planned_queries_are_not_collected_evidence",
+        "planned_queries_are_not_demand_or_supplier_proof",
+        "no_second_lexicon_in_brief_driven_runner",
         "no_manual_competitor_urls_required",
         "no_supplier_csv_required",
         "no_hand_entered_observations_required",
+        f"query_plan_ok:{plan.ok}",
+        *tuple(f"query_plan_flag:{flag}" for flag in plan.flags),
     )
-    return DerivedQueries(candidate_id, marketplace_query, supplier_query, attention_query, notes)
+    return DerivedQueries(
+        candidate_id=candidate_id,
+        marketplace_query=marketplace_query,
+        supplier_query=supplier_query,
+        attention_query=attention_query,
+        notes=notes,
+        planned_queries=planned_queries,
+        query_plan=plan_dict,
+    )
 
 
 def default_fixture_marketplace_rows(brief: ResearchBrief, queries: DerivedQueries) -> tuple[dict[str, Any], ...]:

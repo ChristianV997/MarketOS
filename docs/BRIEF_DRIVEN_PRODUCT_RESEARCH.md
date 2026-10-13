@@ -51,6 +51,9 @@ still returns an honest empty/partial decision package.
 
 ## Authorities reused
 
+- Query planning (canonical, PR #481): `services.research_query_plan.build_research_query_plan`
+  — planned variants are labeled `role=plan` / `is_evidence=false` and are **not**
+  collected evidence. This runner does not keep a second lexicon or planner.
 - Marketplace normalize/build: `backend.adapters.research.marketplace_trends`,
   `evaluation.commerce.marketplace_trends.build_report`
 - Supplier normalize/build: `backend.adapters.research.supplier_feasibility`,

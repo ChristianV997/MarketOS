@@ -97,9 +97,19 @@ def test_derive_queries_from_brief_without_urls_or_csvs():
     queries = derive_queries(brief)
     assert queries.candidate_id == "portable-espresso-maker"
     assert "portable espresso maker" in queries.marketplace_query
-    assert "supplier" in queries.supplier_query
-    assert "home baristas" in queries.attention_query
+    assert queries.marketplace_query != queries.supplier_query
+    assert queries.supplier_query != queries.attention_query
     assert "no_manual_competitor_urls_required" in queries.notes
+    assert "queries_composed_from_services_research_query_plan" in queries.notes
+    assert "planned_queries_are_not_collected_evidence" in queries.notes
+    assert queries.to_dict()["planned_queries_are_evidence"] is False
+    assert queries.planned_queries
+    assert all(item["is_evidence"] is False and item["role"] == "plan" for item in queries.planned_queries)
+    assert queries.query_plan["plan_version"] == "research-query-plan-v1"
+    assert queries.query_plan["live_validated"] is False
+    assert queries.query_plan["launch_authorized"] is False
+    families = {item["source_family"] for item in queries.planned_queries}
+    assert families == {"marketplace", "supplier", "consumer_attention"}
 
 
 def test_happy_path_brief_to_synthesis_with_fake_clients():
@@ -474,6 +484,58 @@ def test_markdown_and_cli_fixture_demo(tmp_path):
     assert payload["execution_authorized"] is False
     assert (out / "brief_driven_research_report.json").is_file()
     assert (out / "brief_driven_research_report.md").is_file()
+
+
+def test_e2e_brief_through_canonical_plan_status_explicit_sources_and_synthesis():
+    """Bounded fixture path: brief → #481 query plan → status-explicit pillars → synthesis."""
+    brief = _brief(
+        product_query="portable blender",
+        category="kitchen appliances",
+        target_region="MX",
+        language="es",
+        intended_buyer="home consumers",
+        evidence_mode="fixture_demo",
+    )
+    queries = derive_queries(brief)
+    assert queries.query_plan["plan_version"] == "research-query-plan-v1"
+    assert queries.to_dict()["planned_queries_are_evidence"] is False
+    assert any(item["source_family"] == "marketplace" for item in queries.planned_queries)
+    assert any(item["source_family"] == "supplier" for item in queries.planned_queries)
+    assert any(item["source_family"] == "consumer_attention" for item in queries.planned_queries)
+
+    market, supplier, _attention = _success_clients(brief)
+    # Keep marketplace+supplier collected; attention explicitly missing (not zero/favorable).
+    report = run_brief_driven_research(
+        brief,
+        marketplace_client=market,
+        supplier_client=supplier,
+        attention_client=StatusOnlyClient("unavailable", "consumer_attention"),
+    )
+    payload = report.to_dict()
+
+    assert payload["execution_authorized"] is False
+    assert payload["live_provider_calls"] is False
+    assert payload["network_calls"] is False
+    assert payload["derived_queries"]["planned_queries_are_evidence"] is False
+    assert payload["derived_queries"]["query_plan"]["authority"] == "query_planning_only"
+    assert payload["source_outcomes"]["marketplace"]["status"] == "collected"
+    assert payload["source_outcomes"]["supplier"]["status"] == "collected"
+    assert payload["source_outcomes"]["consumer_attention"]["status"] == "unavailable"
+    assert payload["source_outcomes"]["consumer_attention"]["record_count"] == 0
+    assert "consumer_attention_status:unavailable" in payload["limitations"]
+    assert "missing_evidence_not_treated_as_zero_or_positive" in " ".join(
+        payload["source_outcomes"]["consumer_attention"]["warnings"]
+    )
+    assert payload["synthesis"] is not None
+    assert payload["synthesis"].get("report_version")
+    assert payload["next_best_action"]
+    assert payload["authority"]["provider_pull_authorized"] is False
+    # Candidate identity preserved from brief slug through planned collection queries.
+    assert payload["derived_queries"]["candidate_id"] == "portable-blender"
+    market_q = payload["derived_queries"]["marketplace_query"].casefold()
+    assert "portable blender" in market_q or "licuadora" in market_q
+    assert payload["derived_queries"]["marketplace_query"] != payload["derived_queries"]["supplier_query"]
+    assert all(item.get("is_evidence") is False for item in payload["derived_queries"]["planned_queries"])
 
 
 def test_brief_validation_requires_core_fields():
