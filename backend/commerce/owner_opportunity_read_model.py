@@ -221,6 +221,46 @@ def _report_has_candidate(report: Any, candidate_id: str) -> bool:
     )
 
 
+def _reference_text(value: Any) -> str | None:
+    """Keep only bounded, printable reference metadata from a report mapping."""
+    if not isinstance(value, str) or not value.isprintable():
+        return None
+    if len(value.encode("utf-8")) > 512:
+        return None
+    return value
+
+
+def _allowed_reference_value(value: Any, allowed: frozenset[str]) -> str | None:
+    if isinstance(value, str) and value in allowed:
+        return value
+    return None
+
+
+def _evidence_reference(item: Any) -> dict[str, Any] | None:
+    """Project an evidence reference without exposing raw report internals."""
+    if isinstance(item, Mapping):
+        value = item.get
+    else:
+        value = lambda key: getattr(item, key, None)
+    evidence_id = _reference_text(value("evidence_id"))
+    source_type = _reference_text(value("source_type"))
+    source_ref = _reference_text(value("source_ref"))
+    if evidence_id is None and source_type is None and source_ref is None:
+        return None
+    status = _reference_text(value("status"))
+    return {
+        "evidence_id": evidence_id,
+        "source_type": source_type,
+        "source_ref": source_ref,
+        "evidence_class": _allowed_reference_value(value("evidence_class"), EVIDENCE_CLASSES)
+        or "unknown",
+        "freshness": _allowed_reference_value(value("freshness"), _FRESHNESS_STATUSES)
+        or "unknown",
+        "status": status,
+        "conflicting": value("conflicting") is True,
+    }
+
+
 def _evidence_coverage(candidate: OpportunityCandidate) -> dict[str, dict[str, Any]]:
     """Project pillar coverage without upgrading evidence or inventing freshness."""
     coverage: dict[str, dict[str, Any]] = {}
@@ -229,30 +269,60 @@ def _evidence_coverage(candidate: OpportunityCandidate) -> dict[str, dict[str, A
         report_entries = _report_evidence(report, candidate.candidate_id)
         candidate_entries = tuple(item for item in candidate.evidence if item.area in areas)
         entries = (*candidate_entries, *report_entries)
-        raw_mode = report.get("evidence_mode") if isinstance(report, Mapping) else None
+        evidence_refs: list[dict[str, Any]] = []
+        seen_references: set[str] = set()
+        for entry in entries:
+            reference = _evidence_reference(entry)
+            if reference is None:
+                continue
+            reference_key = _canonical(reference)
+            if reference_key in seen_references:
+                continue
+            seen_references.add(reference_key)
+            evidence_refs.append(reference)
+        raw_mode = (
+            _allowed_reference_value(report.get("evidence_mode"), _EVIDENCE_MODES)
+            if isinstance(report, Mapping)
+            else None
+        )
         modes = {
             value
             for value in (
                 raw_mode,
-                *(item.get("evidence_mode") for item in report_entries),
+                *(
+                    _allowed_reference_value(item.get("evidence_mode"), _EVIDENCE_MODES)
+                    for item in report_entries
+                ),
             )
-            if value in _EVIDENCE_MODES
+            if value is not None
         }
         classes = {
             value
             for value in (
-                *(item.evidence_class for item in candidate_entries),
-                *(item.get("evidence_class") for item in report_entries),
+                *(
+                    _allowed_reference_value(item.evidence_class, EVIDENCE_CLASSES)
+                    for item in candidate_entries
+                ),
+                *(
+                    _allowed_reference_value(item.get("evidence_class"), EVIDENCE_CLASSES)
+                    for item in report_entries
+                ),
             )
-            if value in EVIDENCE_CLASSES
+            if value is not None
         }
         freshness = {
             value
             for value in (
-                *(item.freshness for item in candidate_entries),
-                *(item.get("freshness") for item in report_entries),
+                *(
+                    _allowed_reference_value(item.freshness, _FRESHNESS_STATUSES)
+                    for item in candidate_entries
+                ),
+                *(
+                    _allowed_reference_value(item.get("freshness"), _FRESHNESS_STATUSES)
+                    for item in report_entries
+                ),
             )
-            if value in _FRESHNESS_STATUSES
+            if value is not None
         }
         conflicting = any(
             item.conflicting is True
@@ -263,6 +333,7 @@ def _evidence_coverage(candidate: OpportunityCandidate) -> dict[str, dict[str, A
             or report_entries
             or _report_has_candidate(report, candidate.candidate_id)
         )
+        incomplete = supplied and not evidence_refs
         if not supplied:
             evidence_mode = "missing"
         elif raw_mode in _EVIDENCE_MODES:
@@ -281,18 +352,20 @@ def _evidence_coverage(candidate: OpportunityCandidate) -> dict[str, dict[str, A
             "evidence_classes": sorted(classes),
             "freshness_statuses": sorted(freshness) or ["unknown"],
             "missing": not supplied,
+            "incomplete": incomplete,
             "stale": "stale" in freshness,
             "conflicting": conflicting,
             "fixture_only": fixture_only,
             "manual_imported": "manual" in classes or "manual_import" in modes,
-            "evidence_count": len(entries),
+            "evidence_count": len(evidence_refs),
+            "evidence_refs": evidence_refs,
         }
     return coverage
 
 
 def _next_research_pillar(coverage: Mapping[str, Mapping[str, Any]]) -> str | None:
     """Choose one stable research target; this never starts a fetch."""
-    for state in ("missing", "conflicting", "stale"):
+    for state in ("missing", "incomplete", "conflicting", "stale"):
         for pillar in ("supplier", "marketplace", "consumer_attention"):
             if coverage.get(pillar, {}).get(state) is True:
                 return pillar
