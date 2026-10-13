@@ -306,10 +306,12 @@ class CJDropshippingClient(SupplierClient):
 
     _READ_ONLY_PATHS = frozenset({
         "/product/list",
+        "/product/listV2",
         "/product/query",
         "/product/stock/queryByVid",
         "/product/stock/queryBySku",
     })
+    _READ_ONLY_POST_PATHS = frozenset({"/logistic/freightCalculate"})
 
     def read_only_get(
         self,
@@ -319,6 +321,7 @@ class CJDropshippingClient(SupplierClient):
         timeout: float = 15.0,
         request_get: Any | None = None,
         access_token: str | None = None,
+        allow_network: bool = False,
     ) -> dict[str, Any]:
         """Perform one explicitly allowlisted CJ catalog GET.
 
@@ -329,12 +332,75 @@ class CJDropshippingClient(SupplierClient):
         """
         if path not in self._READ_ONLY_PATHS:
             raise SupplierQuoteError("cj_read_only_endpoint_not_allowlisted", service=self.name)
+        if request_get is None:
+            if not allow_network:
+                raise SupplierQuoteError("cj_live_network_disabled", service=self.name)
+            from evaluation.companyos.approval_ledger import simulate_action
+            from evaluation.trustos.gate_runner import evaluate_action
+
+            trust_gate = evaluate_action("run_provider_readonly_call")
+            approval_gate = simulate_action("provider_call")
+            if trust_gate.decision != "allow" or approval_gate.result != "would_auto_allow_draft":
+                raise SupplierQuoteError("cj_provider_read_only_call_blocked_by_policy", service=self.name)
+            if not self.is_configured():
+                raise SupplierQuoteError("cj_credentials_missing", service=self.name)
+        elif not access_token:
+            raise SupplierQuoteError("cj_fixture_access_token_required", service=self.name)
         import requests
         getter = request_get or requests.get
         response = getter(
             f"https://developers.cjdropshipping.com/api2.0/v1{path}",
             headers={"CJ-Access-Token": access_token or _cj_token_manager.access_token()},
             params=params or {},
+            timeout=min(max(float(timeout), 1.0), 30.0),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise SupplierQuoteError("cj_read_only_response_not_object", service=self.name)
+        return payload
+
+    def read_only_post(
+        self,
+        path: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        timeout: float = 15.0,
+        request_post: Any | None = None,
+        access_token: str | None = None,
+        allow_network: bool = False,
+    ) -> dict[str, Any]:
+        """POST only the documented, read-only freight quote endpoint.
+
+        Test transports must inject both ``request_post`` and a fixture token;
+        the production transport additionally requires the TrustOS and
+        Approval Ledger provider-read gates. The endpoint allowlist excludes
+        every order, payment, inventory-mutation, and fulfillment operation.
+        """
+        if path not in self._READ_ONLY_POST_PATHS:
+            raise SupplierQuoteError("cj_read_only_endpoint_not_allowlisted", service=self.name)
+        if request_post is None:
+            if not allow_network:
+                raise SupplierQuoteError("cj_live_network_disabled", service=self.name)
+            from evaluation.companyos.approval_ledger import simulate_action
+            from evaluation.trustos.gate_runner import evaluate_action
+
+            trust_gate = evaluate_action("run_provider_readonly_call")
+            approval_gate = simulate_action("provider_call")
+            if trust_gate.decision != "allow" or approval_gate.result != "would_auto_allow_draft":
+                raise SupplierQuoteError("cj_provider_read_only_call_blocked_by_policy", service=self.name)
+            if not self.is_configured():
+                raise SupplierQuoteError("cj_credentials_missing", service=self.name)
+        elif not access_token:
+            raise SupplierQuoteError("cj_fixture_access_token_required", service=self.name)
+
+        import requests
+
+        poster = request_post or requests.post
+        response = poster(
+            f"https://developers.cjdropshipping.com/api2.0/v1{path}",
+            headers={"CJ-Access-Token": access_token or _cj_token_manager.access_token()},
+            json=json_body or {},
             timeout=min(max(float(timeout), 1.0), 30.0),
         )
         response.raise_for_status()
