@@ -72,6 +72,9 @@ def test_known_gaps_are_exactly_the_observed_failures_and_none_is_unexpected():
     report = _full_report()
     expected_hard_failures = {
         ("S04_cross_currency_join", "currency_safety_invariant"),
+        ("S05_stale_consumer_attention", "stale_evidence_safety_invariant"),
+        ("S06_conflicting_price_sources", "price_safety_invariant"),
+        ("S07_incomplete_observations", "incomplete_evidence_safety_invariant"),
         ("S09_identity_variant_mismatch", "identity_safety_invariant"),
     }
     unexpected = {
@@ -98,10 +101,13 @@ def test_known_gaps_are_exactly_the_observed_failures_and_none_is_unexpected():
     ("scenario_id", "check_name"),
     [
         ("S04_cross_currency_join", "currency_safety_invariant"),
+        ("S05_stale_consumer_attention", "stale_evidence_safety_invariant"),
+        ("S06_conflicting_price_sources", "price_safety_invariant"),
+        ("S07_incomplete_observations", "incomplete_evidence_safety_invariant"),
         ("S09_identity_variant_mismatch", "identity_safety_invariant"),
     ],
 )
-def test_high_impact_join_invariants_cannot_be_documented_away(scenario_id, check_name):
+def test_critical_evidence_invariants_cannot_be_documented_away(scenario_id, check_name):
     report = harness.evaluate_packet(harness.load_packet(), only={scenario_id})
     scenario = report["scenarios"][0]
     check = next(item for item in scenario["checks"] if item["name"] == check_name)

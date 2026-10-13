@@ -51,7 +51,13 @@ NON_EXECUTING_ACTIONS = frozenset({
     DRAFT_ACTION,
 })
 NON_ADVANCING_RECOMMENDATIONS = frozenset({ADVANCE, "ready"})
-HARD_SAFETY_CHECKS = frozenset({"currency_safety_invariant", "identity_safety_invariant"})
+HARD_SAFETY_CHECKS = frozenset({
+    "currency_safety_invariant",
+    "identity_safety_invariant",
+    "stale_evidence_safety_invariant",
+    "price_safety_invariant",
+    "incomplete_evidence_safety_invariant",
+})
 # A caution counts only when it is one of these exact codes. The synthesis emits none of the
 # currency, identity, freshness, or price codes today, so those checks are known gaps. Matching is
 # by equality, never substring: an unrelated code cannot satisfy a category by accident.
@@ -371,6 +377,30 @@ def run_checks(expect: dict[str, Any], metrics: dict[str, Any], out: dict[str, A
                 "identity_safety_invariant",
                 out["overall_recommendation"] not in NON_ADVANCING_RECOMMENDATIONS,
                 f"identity_conflicts={metrics['identity_conflicts']} recommendation={out['overall_recommendation']}",
+            )
+        )
+    if metrics["freshness"]["stale"]:
+        checks.append(
+            _check(
+                "stale_evidence_safety_invariant",
+                out["overall_recommendation"] not in NON_ADVANCING_RECOMMENDATIONS,
+                f"stale_observations={metrics['freshness']['stale']} recommendation={out['overall_recommendation']}",
+            )
+        )
+    if metrics["price_conflicts"]:
+        checks.append(
+            _check(
+                "price_safety_invariant",
+                out["overall_recommendation"] not in NON_ADVANCING_RECOMMENDATIONS,
+                f"price_conflicts={metrics['price_conflicts']} recommendation={out['overall_recommendation']}",
+            )
+        )
+    if metrics["incomplete_items"]:
+        checks.append(
+            _check(
+                "incomplete_evidence_safety_invariant",
+                out["overall_recommendation"] not in NON_ADVANCING_RECOMMENDATIONS,
+                f"incomplete_items={metrics['incomplete_items']} recommendation={out['overall_recommendation']}",
             )
         )
     if metrics["pillar_warnings"]:
