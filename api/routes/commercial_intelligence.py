@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, Query
 from backend.identity.operator_gates import commercial_intelligence_run_gate
 from backend.identity.workspaces import WorkspaceAccess
+from api.routes._workspace_binding import bound_opportunity_id, bound_workspace
 from backend.commercial_intelligence.evidence_features import extract_evidence_features
 from backend.commercial_intelligence.market_analyzer import analyze_market_category
 from backend.commercial_intelligence.product_analyzer import analyze_product_viability
@@ -20,8 +21,9 @@ def features_list(workspace_id:str|None=None,limit:int=Query(50,le=500)): return
 def feature_get(feature_set_id:str):
     x=get_commercial_intelligence_registry().get_feature_set(feature_set_id); return x.to_dict() if x else {"status":"not_found","feature_set_id":feature_set_id}
 @router.post("/market/analyze")
-def market_analyze(payload:dict[str,Any]=Body(default={} ),_access:WorkspaceAccess=Depends(commercial_intelligence_run_gate)):
-    try:return {"status":"completed","market_report":analyze_market_category(payload.get("workspace_id","default"),payload.get("category_name"),payload.get("opportunity_id"),_limit(payload.get("limit",500),500)).to_dict()}
+def market_analyze(payload:dict[str,Any]=Body(default={} ),access:WorkspaceAccess=Depends(commercial_intelligence_run_gate)):
+    workspace=bound_workspace(payload,access); opportunity_id=bound_opportunity_id(payload.get("opportunity_id"),workspace)
+    try:return {"status":"completed","market_report":analyze_market_category(workspace,payload.get("category_name"),opportunity_id,_limit(payload.get("limit",500),500)).to_dict()}
     except Exception as exc:return {"status":"partial","warnings":[str(exc)]}
 @router.get("/market/reports")
 def market_reports(workspace_id:str|None=None,category_name:str|None=None,limit:int=Query(50,le=500)):return {"status":"completed","market_reports":[x.to_dict() for x in get_commercial_intelligence_registry().list_market_reports(workspace_id,category_name,_limit(limit,500))]}
@@ -29,8 +31,9 @@ def market_reports(workspace_id:str|None=None,category_name:str|None=None,limit:
 def market_report(report_id:str):
     x=get_commercial_intelligence_registry().get_market_report(report_id); return x.to_dict() if x else {"status":"not_found","report_id":report_id}
 @router.post("/product/analyze")
-def product_analyze(payload:dict[str,Any]=Body(default={} ),_access:WorkspaceAccess=Depends(commercial_intelligence_run_gate)):
-    try:return {"status":"completed","product_report":analyze_product_viability(payload.get("workspace_id","default"),payload.get("product_name"),payload.get("category_name"),payload.get("opportunity_id"),_limit(payload.get("limit",500),500)).to_dict()}
+def product_analyze(payload:dict[str,Any]=Body(default={} ),access:WorkspaceAccess=Depends(commercial_intelligence_run_gate)):
+    workspace=bound_workspace(payload,access); opportunity_id=bound_opportunity_id(payload.get("opportunity_id"),workspace)
+    try:return {"status":"completed","product_report":analyze_product_viability(workspace,payload.get("product_name"),payload.get("category_name"),opportunity_id,_limit(payload.get("limit",500),500)).to_dict()}
     except Exception as exc:return {"status":"partial","warnings":[str(exc)]}
 @router.get("/product/reports")
 def product_reports(workspace_id:str|None=None,product_name:str|None=None,category_name:str|None=None,opportunity_id:str|None=None,limit:int=Query(50,le=500)):return {"status":"completed","product_reports":[x.to_dict() for x in get_commercial_intelligence_registry().list_product_reports(workspace_id,product_name,category_name,opportunity_id,_limit(limit,500))]}
@@ -38,4 +41,6 @@ def product_reports(workspace_id:str|None=None,product_name:str|None=None,catego
 def product_report(report_id:str):
     x=get_commercial_intelligence_registry().get_product_report(report_id); return x.to_dict() if x else {"status":"not_found","report_id":report_id}
 @router.post("/cycle")
-def cycle(payload:dict[str,Any]=Body(default={} ),_access:WorkspaceAccess=Depends(commercial_intelligence_run_gate)): return run_commercial_intelligence_cycle(payload.get("workspace_id","default"),payload.get("category_name"),payload.get("product_name"),payload.get("opportunity_id"),bool(payload.get("include_market",True)),bool(payload.get("include_product",True)))
+def cycle(payload:dict[str,Any]=Body(default={} ),access:WorkspaceAccess=Depends(commercial_intelligence_run_gate)):
+    workspace=bound_workspace(payload,access)
+    return run_commercial_intelligence_cycle(workspace,payload.get("category_name"),payload.get("product_name"),bound_opportunity_id(payload.get("opportunity_id"),workspace),bool(payload.get("include_market",True)),bool(payload.get("include_product",True)))

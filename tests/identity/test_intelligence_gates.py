@@ -33,7 +33,7 @@ from backend.identity.roles import (
     role_grants,
 )
 
-from .conftest import ALICE, ISSUER, OWNER_ALICE
+from .conftest import ALICE, ISSUER, OWNER_ALICE, OWNER_BOB
 
 VIEWER = VerifiedPrincipal(ISSUER, "user_viewer")
 TOKENS = {"tok-operator": ALICE, "tok-viewer": VIEWER}
@@ -60,20 +60,20 @@ EXPECTED_GATES = {
 }
 
 GATED_ROUTES = [
-    pytest.param("/api/intelligence/cycle", {"workspace_id": "ws-1"}, id="intelligence-cycle"),
-    pytest.param("/api/intelligence/knowledge-graph/build", {"workspace_id": "ws-1"}, id="intelligence-graph-build"),
-    pytest.param("/api/intelligence/strategic-priorities/build", {"workspace_id": "ws-1"}, id="intelligence-priorities-build"),
-    pytest.param("/api/intelligence/research-campaigns/build", {"workspace_id": "ws-1"}, id="intelligence-campaigns-build"),
-    pytest.param("/api/intelligence/executive-briefs/build", {"workspace_id": "ws-1"}, id="intelligence-briefs-build"),
-    pytest.param("/api/creative-intelligence/cycle", {"workspace_id": "ws-1", "product_name": "Widget"}, id="creative-cycle"),
-    pytest.param("/api/creative-intelligence/buyer-psychology", {"workspace_id": "ws-1", "product_name": "Widget"}, id="creative-buyer-psychology"),
-    pytest.param("/api/creative-intelligence/angles/generate", {"workspace_id": "ws-1", "product_name": "Widget"}, id="creative-angles-generate"),
+    pytest.param("/api/intelligence/cycle", {"workspace_id": OWNER_ALICE}, id="intelligence-cycle"),
+    pytest.param("/api/intelligence/knowledge-graph/build", {"workspace_id": OWNER_ALICE}, id="intelligence-graph-build"),
+    pytest.param("/api/intelligence/strategic-priorities/build", {"workspace_id": OWNER_ALICE}, id="intelligence-priorities-build"),
+    pytest.param("/api/intelligence/research-campaigns/build", {"workspace_id": OWNER_ALICE}, id="intelligence-campaigns-build"),
+    pytest.param("/api/intelligence/executive-briefs/build", {"workspace_id": OWNER_ALICE}, id="intelligence-briefs-build"),
+    pytest.param("/api/creative-intelligence/cycle", {"workspace_id": OWNER_ALICE, "product_name": "Widget"}, id="creative-cycle"),
+    pytest.param("/api/creative-intelligence/buyer-psychology", {"workspace_id": OWNER_ALICE, "product_name": "Widget"}, id="creative-buyer-psychology"),
+    pytest.param("/api/creative-intelligence/angles/generate", {"workspace_id": OWNER_ALICE, "product_name": "Widget"}, id="creative-angles-generate"),
     pytest.param("/api/creative-intelligence/hooks/generate", {"angle_ids": ["angle-1"]}, id="creative-hooks-generate"),
     pytest.param("/api/creative-intelligence/claims/validate", {"claim": "Lowers cost"}, id="creative-claims-validate"),
-    pytest.param("/api/commercial-intelligence/features/extract", {"workspace_id": "ws-1"}, id="commercial-features-extract"),
-    pytest.param("/api/commercial-intelligence/market/analyze", {"workspace_id": "ws-1", "category_name": "Kitchen"}, id="commercial-market-analyze"),
-    pytest.param("/api/commercial-intelligence/product/analyze", {"workspace_id": "ws-1", "product_name": "Widget"}, id="commercial-product-analyze"),
-    pytest.param("/api/commercial-intelligence/cycle", {"workspace_id": "ws-1"}, id="commercial-cycle"),
+    pytest.param("/api/commercial-intelligence/features/extract", {"workspace_id": OWNER_ALICE}, id="commercial-features-extract"),
+    pytest.param("/api/commercial-intelligence/market/analyze", {"workspace_id": OWNER_ALICE, "category_name": "Kitchen"}, id="commercial-market-analyze"),
+    pytest.param("/api/commercial-intelligence/product/analyze", {"workspace_id": OWNER_ALICE, "product_name": "Widget"}, id="commercial-product-analyze"),
+    pytest.param("/api/commercial-intelligence/cycle", {"workspace_id": OWNER_ALICE}, id="commercial-cycle"),
 ]
 
 # (wiring, headers, expected status, expected code). Wiring says which identity providers the app has:
@@ -91,49 +91,49 @@ CLAIM_RESULT = {"status": "safe", "safe_text": "Lowers cost", "blocked_reasons":
 # Authorized operator: the response body and the exact ordered list of effects the handler performs.
 AUTHORIZED = [
     pytest.param(
-        "/api/intelligence/cycle", {"workspace_id": "ws-1"},
+        "/api/intelligence/cycle", {"workspace_id": OWNER_ALICE},
         {"status": "completed", "warnings": []},
         ["intelligence.cycle"],
         id="intelligence-cycle",
     ),
     pytest.param(
-        "/api/intelligence/knowledge-graph/build", {"workspace_id": "ws-1"},
+        "/api/intelligence/knowledge-graph/build", {"workspace_id": OWNER_ALICE},
         {"snapshot": {"snapshot_id": "graph-1"}, "status": "completed"},
         ["intelligence.knowledge_graph"],
         id="intelligence-graph-build",
     ),
     pytest.param(
-        "/api/intelligence/strategic-priorities/build", {"workspace_id": "ws-1"},
+        "/api/intelligence/strategic-priorities/build", {"workspace_id": OWNER_ALICE},
         {"plan": {"plan_id": "plan-1"}},
         ["intelligence.strategic_priorities", "intelligence_registry.open", "intelligence_registry.register_priority_plan"],
         id="intelligence-priorities-build",
     ),
     pytest.param(
-        "/api/intelligence/research-campaigns/build", {"workspace_id": "ws-1"},
+        "/api/intelligence/research-campaigns/build", {"workspace_id": OWNER_ALICE},
         {"plan": {"plan_id": "campaign-1"}},
         ["intelligence.research_campaigns", "intelligence_registry.open", "intelligence_registry.register_campaign_plan"],
         id="intelligence-campaigns-build",
     ),
     pytest.param(
-        "/api/intelligence/executive-briefs/build", {"workspace_id": "ws-1"},
+        "/api/intelligence/executive-briefs/build", {"workspace_id": OWNER_ALICE},
         {"brief": {"brief_id": "brief-1"}, "status": "completed"},
         ["intelligence.executive_brief"],
         id="intelligence-briefs-build",
     ),
     pytest.param(
-        "/api/creative-intelligence/cycle", {"workspace_id": "ws-1", "product_name": "Widget"},
+        "/api/creative-intelligence/cycle", {"workspace_id": OWNER_ALICE, "product_name": "Widget"},
         {"status": "completed"},
         ["creative.cycle"],
         id="creative-cycle",
     ),
     pytest.param(
-        "/api/creative-intelligence/buyer-psychology", {"workspace_id": "ws-1", "product_name": "Widget"},
+        "/api/creative-intelligence/buyer-psychology", {"workspace_id": OWNER_ALICE, "product_name": "Widget"},
         {"status": "completed", "buyer_psychology_map": {"map_id": "map-1"}},
         ["creative.buyer_psychology"],
         id="creative-buyer-psychology",
     ),
     pytest.param(
-        "/api/creative-intelligence/angles/generate", {"workspace_id": "ws-1", "product_name": "Widget"},
+        "/api/creative-intelligence/angles/generate", {"workspace_id": OWNER_ALICE, "product_name": "Widget"},
         {"status": "completed", "angles": [{"angle_id": "angle-1"}]},
         ["creative.angles"],
         id="creative-angles-generate",
@@ -151,25 +151,25 @@ AUTHORIZED = [
         id="creative-claims-validate",
     ),
     pytest.param(
-        "/api/commercial-intelligence/features/extract", {"workspace_id": "ws-1"},
+        "/api/commercial-intelligence/features/extract", {"workspace_id": OWNER_ALICE},
         {"status": "completed", "feature_set": {"feature_set_id": "fs-1"}},
         ["commercial.extract_features"],
         id="commercial-features-extract",
     ),
     pytest.param(
-        "/api/commercial-intelligence/market/analyze", {"workspace_id": "ws-1", "category_name": "Kitchen"},
+        "/api/commercial-intelligence/market/analyze", {"workspace_id": OWNER_ALICE, "category_name": "Kitchen"},
         {"status": "completed", "market_report": {"report_id": "market-1"}},
         ["commercial.market_analyze"],
         id="commercial-market-analyze",
     ),
     pytest.param(
-        "/api/commercial-intelligence/product/analyze", {"workspace_id": "ws-1", "product_name": "Widget"},
+        "/api/commercial-intelligence/product/analyze", {"workspace_id": OWNER_ALICE, "product_name": "Widget"},
         {"status": "completed", "product_report": {"report_id": "product-1"}},
         ["commercial.product_analyze"],
         id="commercial-product-analyze",
     ),
     pytest.param(
-        "/api/commercial-intelligence/cycle", {"workspace_id": "ws-1"},
+        "/api/commercial-intelligence/cycle", {"workspace_id": OWNER_ALICE},
         {"status": "completed", "warnings": []},
         ["commercial.cycle"],
         id="commercial-cycle",
@@ -196,6 +196,19 @@ class Effects:
 
     def names(self) -> list[str]:
         return [name for name, _args, _kwargs in self.calls]
+
+
+class _Angle:
+    def __init__(self, angle_id: str, workspace_id: str) -> None:
+        self.angle_id = angle_id
+        self.workspace_id = workspace_id
+
+    def to_dict(self) -> dict:
+        return {"angle_id": self.angle_id, "workspace_id": self.workspace_id}
+
+
+# Synthetic angles: one in the operator's workspace, one in another workspace.
+ANGLE_OWNERS = {"angle-1": OWNER_ALICE, "angle-foreign": OWNER_BOB}
 
 
 class _Report:
@@ -233,6 +246,22 @@ def effects(api, monkeypatch) -> Effects:
 
     rec = Effects()
 
+    import backend.discovery.opportunity_registry as opportunity_module
+
+    # Synthetic opportunities: one in the operator's workspace, one in another workspace.
+    opportunity_owners = {"opp-owned": OWNER_ALICE, "opp-foreign": OWNER_BOB}
+
+    class _Opportunity:
+        def __init__(self, workspace_id: str) -> None:
+            self.workspace_id = workspace_id
+
+    class _OpportunityRegistry:
+        def get_opportunity(self, item_id: str):
+            workspace = opportunity_owners.get(item_id)
+            return None if workspace is None else _Opportunity(workspace)
+
+    monkeypatch.setattr(opportunity_module, "get_opportunity_registry", lambda: _OpportunityRegistry())
+
     def stub(name: str, result):
         def run(*args, **kwargs):
             rec.record(name, *args, **kwargs)
@@ -251,7 +280,8 @@ def effects(api, monkeypatch) -> Effects:
             rec.record(f"{self._domain}.register_campaign_plan", plan)
 
         def get_angle(self, angle_id: str):
-            return _Report({"angle_id": angle_id})
+            workspace = ANGLE_OWNERS.get(angle_id)
+            return None if workspace is None else _Angle(angle_id, workspace)
 
     def registry(domain: str):
         def open_registry():
@@ -318,14 +348,132 @@ def test_operator_gets_the_unchanged_response_and_the_expected_effects(api, stor
     assert effects.names() == expected_effects
 
 
-def test_the_operator_payload_reaches_the_handler_unchanged(api, store, effects, monkeypatch):
+# Mutating routes that take a workspace. Each path body is listed without workspace_id; the engine that must receive
+# the verified workspace is named so the test reads that engine's call, not an earlier registry access.
+WORKSPACE_ROUTES = [
+    pytest.param("/api/intelligence/cycle", {}, "intelligence.cycle", id="intelligence-cycle"),
+    pytest.param("/api/intelligence/knowledge-graph/build", {}, "intelligence.knowledge_graph", id="intelligence-graph-build"),
+    pytest.param("/api/intelligence/strategic-priorities/build", {}, "intelligence.strategic_priorities", id="intelligence-priorities-build"),
+    pytest.param("/api/intelligence/research-campaigns/build", {}, "intelligence.research_campaigns", id="intelligence-campaigns-build"),
+    pytest.param("/api/intelligence/executive-briefs/build", {}, "intelligence.executive_brief", id="intelligence-briefs-build"),
+    pytest.param("/api/creative-intelligence/cycle", {"product_name": "Widget"}, "creative.cycle", id="creative-cycle"),
+    pytest.param("/api/creative-intelligence/buyer-psychology", {"product_name": "Widget"}, "creative.buyer_psychology", id="creative-buyer-psychology"),
+    pytest.param("/api/creative-intelligence/angles/generate", {"product_name": "Widget"}, "creative.angles", id="creative-angles-generate"),
+    pytest.param("/api/commercial-intelligence/market/analyze", {"category_name": "Kitchen"}, "commercial.market_analyze", id="commercial-market-analyze"),
+    pytest.param("/api/commercial-intelligence/product/analyze", {"product_name": "Widget"}, "commercial.product_analyze", id="commercial-product-analyze"),
+    pytest.param("/api/commercial-intelligence/cycle", {}, "commercial.cycle", id="commercial-cycle"),
+]
+
+# Route, body, engine, and the position of ``opportunity_id`` among that engine's positional arguments.
+OPPORTUNITY_ROUTES = [
+    pytest.param("/api/creative-intelligence/cycle", {"product_name": "Widget"}, "creative.cycle", 3, id="creative-cycle"),
+    pytest.param("/api/creative-intelligence/buyer-psychology", {"product_name": "Widget"}, "creative.buyer_psychology", 3, id="creative-buyer-psychology"),
+    pytest.param("/api/creative-intelligence/angles/generate", {"product_name": "Widget"}, "creative.angles", 3, id="creative-angles-generate"),
+    pytest.param("/api/commercial-intelligence/market/analyze", {"category_name": "Kitchen"}, "commercial.market_analyze", 2, id="commercial-market-analyze"),
+    pytest.param("/api/commercial-intelligence/product/analyze", {"product_name": "Widget"}, "commercial.product_analyze", 3, id="commercial-product-analyze"),
+    pytest.param("/api/commercial-intelligence/cycle", {}, "commercial.cycle", 3, id="commercial-cycle"),
+]
+
+
+def _engine_calls(effects: Effects, engine: str) -> list[tuple]:
+    return [args for name, args, _kwargs in effects.calls if name == engine]
+
+
+def test_the_operator_payload_reaches_the_engine_bound_to_the_verified_workspace(api, store, effects, monkeypatch):
     _wire(api, monkeypatch, store, "wired")
 
-    response = TestClient(api.app).post("/api/commercial-intelligence/cycle", json={"workspace_id": "ws-7", "category_name": "Kitchen"}, headers=OPERATOR_HEADERS)
+    response = TestClient(api.app).post("/api/commercial-intelligence/cycle", json={"workspace_id": OWNER_ALICE, "category_name": "Kitchen"}, headers=OPERATOR_HEADERS)
 
     assert response.status_code == 200
-    _name, args, _kwargs = effects.calls[0]
-    assert args[0] == "ws-7" and args[1] == "Kitchen"
+    args = _engine_calls(effects, "commercial.cycle")[0]
+    assert args[0] == OWNER_ALICE and args[1] == "Kitchen"
+
+
+@pytest.mark.parametrize("path, body, engine", WORKSPACE_ROUTES)
+def test_the_named_verified_workspace_is_the_target(api, store, effects, monkeypatch, path, body, engine):
+    _wire(api, monkeypatch, store, "wired")
+
+    response = TestClient(api.app).post(path, json={**body, "workspace_id": OWNER_ALICE}, headers=OPERATOR_HEADERS)
+
+    assert response.status_code == 200
+    assert _engine_calls(effects, engine)[0][0] == OWNER_ALICE
+
+
+@pytest.mark.parametrize("path, body, engine", WORKSPACE_ROUTES)
+def test_an_absent_workspace_is_bound_to_the_verified_workspace_not_a_default(api, store, effects, monkeypatch, path, body, engine):
+    _wire(api, monkeypatch, store, "wired")
+
+    response = TestClient(api.app).post(path, json=body, headers=OPERATOR_HEADERS)
+
+    assert response.status_code == 200
+    assert _engine_calls(effects, engine)[0][0] == OWNER_ALICE
+
+
+@pytest.mark.parametrize("path, body, engine", WORKSPACE_ROUTES)
+def test_a_foreign_workspace_in_the_body_is_refused_before_any_engine_runs(api, store, effects, monkeypatch, path, body, engine):
+    _wire(api, monkeypatch, store, "wired")
+
+    response = TestClient(api.app).post(path, json={**body, "workspace_id": OWNER_BOB}, headers=OPERATOR_HEADERS)
+
+    # 403, not a 200 partial: the market and product handlers wrap their engine calls in try/except.
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "workspace_not_authorized"
+    assert effects.calls == []
+
+
+def test_a_foreign_workspace_in_the_hook_request_is_refused_before_any_engine_runs(api, store, effects, monkeypatch):
+    _wire(api, monkeypatch, store, "wired")
+
+    response = TestClient(api.app).post(
+        "/api/creative-intelligence/hooks/generate", json={"angle_ids": ["angle-1"], "workspace_id": OWNER_BOB}, headers=OPERATOR_HEADERS
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "workspace_not_authorized"
+    assert effects.calls == []
+
+
+@pytest.mark.parametrize("path, body, engine, position", OPPORTUNITY_ROUTES)
+def test_a_foreign_opportunity_never_reaches_the_engine(api, store, effects, monkeypatch, path, body, engine, position):
+    _wire(api, monkeypatch, store, "wired")
+
+    response = TestClient(api.app).post(path, json={**body, "opportunity_id": "opp-foreign"}, headers=OPERATOR_HEADERS)
+
+    assert response.status_code == 200
+    assert _engine_calls(effects, engine)[0][position] is None
+
+
+@pytest.mark.parametrize("path, body, engine, position", OPPORTUNITY_ROUTES)
+def test_a_verified_workspace_opportunity_reaches_the_engine(api, store, effects, monkeypatch, path, body, engine, position):
+    _wire(api, monkeypatch, store, "wired")
+
+    response = TestClient(api.app).post(path, json={**body, "opportunity_id": "opp-owned"}, headers=OPERATOR_HEADERS)
+
+    assert response.status_code == 200
+    assert _engine_calls(effects, engine)[0][position] == "opp-owned"
+
+
+def test_a_foreign_angle_never_reaches_hook_generation_and_answers_like_an_unknown_one(api, store, effects, monkeypatch):
+    _wire(api, monkeypatch, store, "wired")
+    client = TestClient(api.app)
+
+    foreign = client.post("/api/creative-intelligence/hooks/generate", json={"angle_ids": ["angle-foreign"]}, headers=OPERATOR_HEADERS)
+    unknown = client.post("/api/creative-intelligence/hooks/generate", json={"angle_ids": ["angle-missing"]}, headers=OPERATOR_HEADERS)
+
+    assert foreign.status_code == unknown.status_code == 200
+    assert foreign.json() == unknown.json()
+    assert _engine_calls(effects, "creative.hooks")[0][0] == []
+
+
+def test_only_verified_workspace_angles_reach_hook_generation(api, store, effects, monkeypatch):
+    _wire(api, monkeypatch, store, "wired")
+
+    response = TestClient(api.app).post(
+        "/api/creative-intelligence/hooks/generate", json={"angle_ids": ["angle-foreign", "angle-missing", "angle-1"]}, headers=OPERATOR_HEADERS
+    )
+
+    assert response.status_code == 200
+    assert [angle.angle_id for angle in _engine_calls(effects, "creative.hooks")[0][0]] == ["angle-1"]
 
 
 def test_every_post_route_under_the_intelligence_prefixes_depends_on_its_gate(api):
