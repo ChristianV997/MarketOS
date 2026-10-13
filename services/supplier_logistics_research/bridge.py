@@ -100,6 +100,7 @@ def _evidence(record: SupplierFeasibilityEvidence, field_name: str, value: Any) 
     reference = EvidenceRef(
         evidence_id=f"supplier-evidence-{evidence_id}",
         source_type=record.source_type,
+        source_url=record.source_url,
         document_ref=record.supplier_product_id,
         origin=record.warehouse_region,
         destination=record.destination_region,
@@ -164,7 +165,11 @@ def build_offer_from_supplier_evidence(
     controls.reject_unsafe_input(record.to_dict(), field_name="supplier evidence")
     currency = record.currency.upper() if isinstance(record.currency, str) and record.currency.strip() else None
     quoted_price = _money(record, "unit_cost", record.unit_cost, currency)
-    shipping_currency = record.shipping_currency or currency
+    shipping_currency = (
+        record.shipping_currency.upper()
+        if isinstance(record.shipping_currency, str) and record.shipping_currency.strip()
+        else None
+    )
     supplier_shipping = _money(record, "shipping_cost", record.shipping_cost, shipping_currency)
     price_evidence = _evidence(record, "unit_cost", record.unit_cost)
     shipping_evidence = _evidence(record, "shipping_cost", record.shipping_cost)

@@ -21,6 +21,7 @@ def test_imported_supplier_evidence_flows_to_canonical_landed_cost_report(offer_
     from pathlib import Path
 
     record = import_json(Path(__file__).resolve().parents[2] / "fixtures" / "supplier_feasibility" / "cj_validation_pack_success.json", supplier="cj", source_type="cj_validation_pack_report")[0]
+    record = replace(record, shipping_currency="USD")
     report = build_report_from_supplier_evidence(
         record,
         target_price=Money("50", "USD", source="operator_input", provenance="assumed", evidence_state="assumed"),
@@ -57,12 +58,52 @@ def test_missing_shipping_stays_missing_in_kernel_evidence(offer_factory):
     assert scenario.supplier_shipping.evidence_state == "unknown"
 
 
+def test_missing_shipping_currency_does_not_infer_product_currency(offer_factory):
+    from backend.adapters.research.supplier_feasibility import import_json
+    from pathlib import Path
+
+    record = import_json(Path(__file__).resolve().parents[2] / "fixtures" / "supplier_feasibility" / "cj_validation_pack_success.json", supplier="cj", source_type="cj_validation_pack_report")[0]
+    record = replace(record, shipping_currency=None)
+    report = build_report_from_supplier_evidence(
+        record,
+        target_price=Money("50", "USD", source="operator_input", provenance="assumed", evidence_state="assumed"),
+        generated_at=GENERATED_AT,
+    )
+
+    assert report.offer.goods is not None
+    assert report.offer.goods.shipping.supplier_shipping is None
+    result = next(item for item in report.landed_cost_scenarios if item.scenario_id == "base").result
+    assert "supplier_shipping" in result.missing_inputs
+    assert result.supplier_shipping.source == "assumed_supplier_shipping"
+    assert result.supplier_shipping.evidence_state == "unknown"
+
+
+def test_source_url_survives_evidence_ref_and_report_serialization(offer_factory):
+    from backend.adapters.research.supplier_feasibility import import_json
+    from pathlib import Path
+
+    source_url = "https://example.invalid/supplier-page"
+    record = import_json(Path(__file__).resolve().parents[2] / "fixtures" / "supplier_feasibility" / "cj_validation_pack_success.json", supplier="cj", source_type="cj_validation_pack_report")[0]
+    record = replace(record, source_url=source_url)
+    report = build_report_from_supplier_evidence(
+        record,
+        target_price=Money("50", "USD", source="operator_input", provenance="assumed", evidence_state="assumed"),
+        generated_at=GENERATED_AT,
+    )
+
+    assert report.offer.goods is not None
+    evidence_ref = report.offer.goods.supplier_evidence.evidence_ref
+    assert evidence_ref is not None
+    assert evidence_ref.source_url == source_url
+    assert report.to_dict()["offer"]["goods"]["supplier_evidence"]["evidence_ref"]["source_url"] == source_url
+
+
 def test_explicit_zero_shipping_is_not_missing(offer_factory):
     from backend.adapters.research.supplier_feasibility import import_json
     from pathlib import Path
 
     record = import_json(Path(__file__).resolve().parents[2] / "fixtures" / "supplier_feasibility" / "cj_validation_pack_success.json", supplier="cj", source_type="cj_validation_pack_report")[0]
-    record = replace(record, shipping_cost=0.0, field_provenance={**record.field_provenance, "shipping_cost": "observed"})
+    record = replace(record, shipping_cost=0.0, shipping_currency="USD", field_provenance={**record.field_provenance, "shipping_cost": "observed"})
     offer = build_offer_from_supplier_evidence(record)
 
     assert offer.goods is not None
