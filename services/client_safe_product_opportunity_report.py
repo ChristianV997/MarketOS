@@ -36,6 +36,22 @@ _PILLAR_AREAS = {
     "consumer_attention": frozenset({"consumer", "attention", "consumer_attention"}),
 }
 _SECRET_SHAPED_VALUE = re.compile(r"(?i)(?:sk[_-](?:live|test|proj)[_-][A-Za-z0-9_-]{4,})")
+_COVERAGE_FIELDS = (
+    "status",
+    "evidence_mode",
+    "evidence_classes",
+    "freshness_statuses",
+    "missing",
+    "incomplete",
+    "stale",
+    "conflicting",
+    "fixture_only",
+    "manual_imported",
+    "evidence_count",
+    "evidence_refs",
+)
+_MAX_COVERAGE_REFERENCES = 32
+_MAX_COVERAGE_REFERENCE_BYTES = 512
 
 
 class ClientSafeProductOpportunityReportError(ValueError):
@@ -79,6 +95,77 @@ def _evidence_view(item: Mapping[str, Any]) -> dict[str, Any]:
         "status": item.get("status"),
         "conflicting": bool(item.get("conflicting", False)),
     }
+
+
+def _bounded_coverage_text(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.isprintable():
+        return None
+    if len(value.encode("utf-8")) > _MAX_COVERAGE_REFERENCE_BYTES:
+        return None
+    return value
+
+
+def _bounded_coverage_strings(value: Any) -> list[str]:
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    values = {
+        text
+        for item in value
+        if (text := _bounded_coverage_text(item)) is not None
+    }
+    return sorted(values)
+
+
+def _coverage_reference_view(value: Any) -> dict[str, Any] | None:
+    """Project one read-model reference without copying arbitrary metadata."""
+    if not isinstance(value, Mapping):
+        return None
+    projected: dict[str, Any] = {}
+    for field in ("evidence_id", "source_type", "source_ref", "status"):
+        text = _bounded_coverage_text(value.get(field))
+        if text is not None:
+            projected[field] = text
+    for field in ("evidence_class", "freshness"):
+        text = _bounded_coverage_text(value.get(field))
+        projected[field] = text if text is not None else "unknown"
+    projected["conflicting"] = value.get("conflicting") is True
+    if not any(field in projected for field in ("evidence_id", "source_type", "source_ref")):
+        return None
+    return projected
+
+
+def _evidence_coverage_view(value: Any) -> dict[str, dict[str, Any]]:
+    """Pass through only the bounded, client-safe read-model coverage fields."""
+    if not isinstance(value, Mapping):
+        return {}
+    projected: dict[str, dict[str, Any]] = {}
+    for pillar in _PILLAR_AREAS:
+        raw = value.get(pillar)
+        if not isinstance(raw, Mapping):
+            continue
+        item: dict[str, Any] = {}
+        for field in _COVERAGE_FIELDS:
+            if field not in raw:
+                continue
+            raw_value = raw[field]
+            if field in {"status", "evidence_mode"}:
+                item[field] = _bounded_coverage_text(raw_value) or "unknown"
+            elif field in {"evidence_classes", "freshness_statuses"}:
+                item[field] = _bounded_coverage_strings(raw_value)
+            elif field in {"missing", "incomplete", "stale", "conflicting", "fixture_only", "manual_imported"}:
+                item[field] = raw_value is True
+            elif field == "evidence_count":
+                item[field] = raw_value if isinstance(raw_value, int) and not isinstance(raw_value, bool) and raw_value >= 0 else 0
+            elif field == "evidence_refs":
+                raw_refs = raw_value if isinstance(raw_value, (list, tuple)) else ()
+                item[field] = [
+                    reference
+                    for raw_reference in raw_refs[:_MAX_COVERAGE_REFERENCES]
+                    if (reference := _coverage_reference_view(raw_reference)) is not None
+                ]
+                item["evidence_refs_truncated"] = len(raw_refs) > _MAX_COVERAGE_REFERENCES
+        projected[pillar] = item
+    return projected
 
 
 def _currency_boundaries(economics: Mapping[str, Any]) -> dict[str, Any]:
@@ -128,6 +215,7 @@ def _candidate_view(candidate: Mapping[str, Any]) -> dict[str, Any]:
         "offering_kind": candidate.get("offering_kind"),
         "category": candidate.get("category"),
         "evidence_by_pillar": by_pillar,
+        "evidence_coverage": _evidence_coverage_view(candidate.get("evidence_coverage")),
         "evidence_classes": list(candidate.get("evidence_classes", ())),
         "economics": {
             "status": economics.get("status", "unknown"),
@@ -155,6 +243,7 @@ def _safe_export_payload(report: Mapping[str, Any]) -> dict[str, Any]:
             {
                 "candidate_id": candidate["candidate_id"],
                 "evidence_by_pillar": candidate["evidence_by_pillar"],
+                "evidence_coverage": candidate["evidence_coverage"],
                 "evidence_classes": candidate["evidence_classes"],
                 "economics": candidate["economics"],
                 "conflicts": candidate["conflicts"],

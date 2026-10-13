@@ -31,7 +31,10 @@ never selects a workspace.
 The report preserves canonical candidate order and identity, evidence
 references grouped as marketplace, supplier, and consumer-attention metadata,
 evidence class, freshness as an evidence-age label, blockers, conflicts,
-unknowns, assumptions, and per-currency boundaries. Missing amounts remain
+unknowns, assumptions, per-currency boundaries, and the read model's bounded
+evidence-coverage metadata. Coverage is passed through an explicit pillar and
+field allowlist; its evidence references are capped and never recalculated.
+Missing amounts remain
 missing; explicit zero values remain explicit values. Currency conversion is
 never inferred or performed.
 
