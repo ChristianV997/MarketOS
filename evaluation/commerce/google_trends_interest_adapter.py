@@ -1,20 +1,26 @@
 """Official Google Trends organic search-interest adapter (fixture / dry-run).
 
-Primary-source evaluation (2025-07 Google Search Central):
+Primary-source evaluation (Google Search Central, public pages only):
 Google published an official Google Trends API **alpha**. Access requires an
-alpha-tester application and is limited; the public landing page does not
-publish GA pricing, quotas, or a complete method schema. That makes the API
-officially real but **not commercially generally available** for product-
-opportunity automation today.
+alpha-tester application and is limited. Detailed API reference pages are
+access-gated for accepted testers (public help notes a 404 without access).
+Public landing/blog pages do **not** publish GA status, quotas, pricing,
+OAuth scopes, endpoint URLs, or complete method/field schemas.
+
+Confirmed on those public pages: consistently scaled **search interest**
+(not absolute counts; not the Trends website's per-request 0–100 rescale),
+rolling ~1800-day (~5y) window, data up to about 2 days ago, aggregations
+daily/weekly/monthly/yearly, and ISO 3166-2 region/sub-region geos.
 
 This module implements only the repository-permitted contract / fixture /
-fake-transport layer for that official relative-interest evidence category.
+fake-transport layer for that relative-interest evidence category.
 It never uses Pytrends, browser scraping, undocumented endpoints, proxies,
 credentials, or live network calls.
 
 Normalized values are relative / consistently scaled search interest only —
-never absolute search volume or purchase intent. Missing observations stay
-unavailable / incomplete; they are never coerced to zero.
+never search volume, sales, supplier proof, purchase intent, or launch
+evidence. Missing observations stay unavailable / incomplete; they are
+never coerced to zero.
 """
 from __future__ import annotations
 
@@ -30,6 +36,7 @@ EVIDENCE_CATEGORY = "OrganicSearchInterestEvidence"
 PRIMARY_DOCS = (
     "https://developers.google.com/search/apis/trends",
     "https://developers.google.com/search/blog/2025/07/trends-api",
+    "https://developers.google.com/search/apis/trends/help/cant-access-docs",
 )
 
 # Public docs: rolling ~1800-day (~5y) window; data up to ~2 days ago.
@@ -37,6 +44,9 @@ MAX_LOOKBACK_DAYS = 1800
 DATA_LAG_DAYS = 2
 STALE_AFTER_DAYS = 180
 
+# Adapter request-shape vocabulary only — not confirmed Google RPC/method names.
+# Public alpha pages describe time-series interest + geo breakdowns without
+# publishing method identifiers.
 REQUEST_KINDS = (
     "interest_over_time",
     "interest_by_region",
@@ -75,10 +85,18 @@ READINESS_STATES = (
 UNAVAILABLE_FIELDS = (
     "absolute_search_volume",
     "purchase_intent",
+    "sales_or_demand_proof",
+    "supplier_proof",
+    "launch_evidence",
     "published_quota",
     "published_unit_pricing",
     "ga_sla",
     "public_oauth_scope_list",
+    "public_endpoint_url",
+    "public_method_schema",
+    "public_auth_method_details",
+    "language_filter_confirmed_on_public_docs",
+    "website_0_100_rescale",
 )
 
 _SECRET_KEYS = frozenset({
@@ -320,7 +338,10 @@ class FakeTrendsTransport:
             return FakeTransportResult(
                 "unsupported_access",
                 (),
-                ("alpha_access_not_granted", "oauth_project_not_allowlisted"),
+                (
+                    "alpha_access_not_granted",
+                    "auth_method_and_project_allowlist_unknown_until_alpha_docs",
+                ),
                 False,
                 False,
             )
@@ -481,7 +502,8 @@ class GoogleTrendsInterestReport:
             "",
             "## Evidence boundary",
             "",
-            "- Relative search interest only; not absolute volume or purchase intent.",
+            "- Relative / consistently scaled search interest only — not absolute volume,",
+            "  website 0–100 rescale, sales, supplier proof, or launch evidence.",
             "- Separate from marketplace price, supplier proof, and launch authority.",
             "",
             "## Next best action",
@@ -580,8 +602,10 @@ def normalize_interest_observation(
         collected_at=collected_at,
         limitations=(
             "Relative / consistently scaled search interest only; not absolute search volume.",
-            "Not purchase intent, marketplace price proof, supplier proof, or launch authority.",
+            "Not the Trends website per-request 0–100 rescale; not sales or demand counts.",
+            "Not purchase intent, marketplace price proof, supplier proof, or launch evidence.",
             "Synthetic fixture unless a future approved live transport is implemented.",
+            "Language is adapter observation metadata; public Trends API pages do not confirm a language filter.",
         ),
         evidence_category=EVIDENCE_CATEGORY,
         can_feed_attention_reports=True,
@@ -715,10 +739,15 @@ def _access_assessment() -> GoogleTrendsAccessAssessment:
         commercially_generally_available=False,
         alpha_application_required=True,
         primary_documentation=PRIMARY_DOCS,
-        supported_geographies_note="ISO 3166-2 region and sub-region breakdowns (public Trends API alpha announcement).",
+        supported_geographies_note=(
+            "Public announcement: region and sub-region breakdowns per ISO 3166-2. "
+            "WORLD is an adapter convenience label only — not confirmed on public pages."
+        ),
         supported_time_window_note=(
-            f"Rolling ~{MAX_LOOKBACK_DAYS}-day (~5 year) window; data available up to about "
-            f"{DATA_LAG_DAYS} days ago; aggregations daily/weekly/monthly/yearly."
+            f"Public announcement: rolling ~{MAX_LOOKBACK_DAYS}-day (~5 year) window; "
+            f"data available up to about {DATA_LAG_DAYS} days ago; aggregations "
+            "daily/weekly/monthly/yearly. Exact request field names remain unknown "
+            "until alpha reference docs are accessible."
         ),
         supported_aggregations=TIME_RESOLUTIONS,
         quotas_published=False,
@@ -729,15 +758,18 @@ def _access_assessment() -> GoogleTrendsAccessAssessment:
         undocumented_endpoints_allowed=False,
         suitability_summary=(
             "Official Google Trends API exists as an alpha with application-gated access; "
-            "it is not commercially generally available. Suitable only as an offline "
-            "contract/fixture vertical until GA access, published quotas/pricing, Approval "
-            "Ledger approval, and a separately reviewed transport exist."
+            "detailed reference docs are gated for accepted testers. Not commercially "
+            "generally available. Suitable only as an offline contract/fixture vertical "
+            "for relative search-interest evidence until access, published "
+            "quotas/pricing/method schema, Approval Ledger approval, and a separately "
+            "reviewed transport exist."
         ),
         alternative_considered=(
             "No non-overlapping official GA alternative publishes relative organic "
             "search-interest time series. Google Ads keyword historical metrics are "
             "absolute volume estimates (different category; overlaps DataForSEO keyword "
-            "demand) and were not selected."
+            "demand) and were not selected. Pytrends/scraping/undocumented endpoints "
+            "are forbidden here."
         ),
     )
 
@@ -777,8 +809,9 @@ def build_google_trends_interest_report(
         request_plan_id="google-trends-interest-request-plan-v1",
         request_kind=request_kind,
         endpoint_placeholder=(
-            "alpha://searchtrends.googleapis.com/v1alpha/* "
-            "(method schema access-gated; not fully published on the public landing page)"
+            "unknown_until_alpha_reference_docs "
+            "(public Trends API pages do not publish endpoint URLs or method schemas; "
+            "accepted alpha testers receive gated documentation)"
         ),
         terms=clean_terms,
         geography=geo,
@@ -786,6 +819,7 @@ def build_google_trends_interest_report(
         time_resolution=resolution,
         window_start=str(window_start)[:10],
         window_end=str(window_end)[:10],
+        # Fixture/dry-run caps only — official max terms/requests are unpublished.
         max_terms=10,
         max_requests=10,
         credential_reference_id="credential-google-trends-official",
@@ -798,8 +832,13 @@ def build_google_trends_interest_report(
         raw_payload_stored=False,
         schedule_enabled=False,
         status=plan_status,
-        cost_note="Unit pricing is not published on the public Trends API alpha landing page; treat cost as unavailable.",
-        quota_note="Numeric quotas are not published on the public Trends API alpha landing page; treat quota as unavailable until Google documents them for an approved project.",
+        cost_note=(
+            "Unit pricing is unknown on public Trends API alpha pages; treat cost as unavailable."
+        ),
+        quota_note=(
+            "Numeric quotas are unknown on public Trends API alpha pages; treat quota as "
+            "unavailable until Google documents them for an approved alpha/GA project."
+        ),
     )
     parsed = parse_google_trends_interest_fixture(
         payload or _default_payload(clean_terms, geo, plan.language, resolution),
@@ -860,10 +899,14 @@ def build_google_trends_interest_report(
         "launch_authority": False,
         "purchase_intent_authority": False,
         "absolute_volume_authority": False,
+        "sales_or_demand_proof": False,
+        "website_0_100_rescale": False,
+        "relative_search_interest_evidence": True,
         "attention_evidence_only": True,
     }
     blocked_live = (
         "Google Trends API alpha access is application-gated and not commercially GA.",
+        "Detailed method/endpoint/auth docs are gated; public pages leave them unknown.",
         "Credential reference is metadata-only / absent; no secret is loaded.",
         "Approval Ledger provider_call approval is missing.",
         "Terms and privacy reviews are incomplete.",
@@ -891,10 +934,12 @@ def build_google_trends_interest_report(
         unavailable_fields=UNAVAILABLE_FIELDS,
         blocked_live_activation=blocked_live,
         next_best_action=(
-            "Keep Google Trends interest evidence in fixture/dry-run mode. Re-check "
-            "primary docs for GA availability; only after alpha/GA access, published "
-            "quotas/pricing, Approval Ledger approval, and a separately reviewed "
-            "transport may a live read-only path be considered."
+            "Keep Google Trends interest evidence in fixture/dry-run mode as relative "
+            "search-interest only. Before any transport: obtain alpha/GA access and "
+            "gated reference docs; record published endpoints/methods/auth, quotas, "
+            "and pricing; Approval Ledger provider_call approval; metadata-only "
+            "credential reference; separately reviewed fail-closed live transport. "
+            "Never treat results as volume, sales, supplier proof, or launch evidence."
         ),
         transport_result=transport_result,
     )

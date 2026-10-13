@@ -54,9 +54,36 @@ def test_source_evaluation_marks_alpha_not_commercially_ga():
     assert access.pytrends_allowed is False
     assert access.browser_scraping_allowed is False
     assert access.undocumented_endpoints_allowed is False
+    assert access.quotas_published is False
+    assert access.costs_published is False
     assert "alpha" in access.suitability_summary.lower()
+    assert "developers.google.com/search/apis/trends" in access.primary_documentation[0]
+    assert any("cant-access-docs" in url for url in access.primary_documentation)
     assert report.request_plan.live_request_created is False
     assert report.safety_summary.network_calls is False
+    assert "unknown_until_alpha_reference_docs" in report.request_plan.endpoint_placeholder
+    assert "googleapis.com" not in report.request_plan.endpoint_placeholder
+    assert "published_quota" in report.unavailable_fields
+    assert "public_method_schema" in report.unavailable_fields
+    assert "website_0_100_rescale" in report.unavailable_fields
+
+
+def test_relative_interest_is_not_volume_sales_or_launch_evidence():
+    report = build_google_trends_interest_report(payload=load("trends_interest_valid.json"))
+    assert report.evidence_boundary["relative_search_interest_evidence"] is True
+    assert report.evidence_boundary["absolute_volume_authority"] is False
+    assert report.evidence_boundary["sales_or_demand_proof"] is False
+    assert report.evidence_boundary["website_0_100_rescale"] is False
+    assert report.evidence_boundary["supplier_proof"] is False
+    assert report.evidence_boundary["launch_authority"] is False
+    for item in report.observations:
+        blob = " ".join(item.limitations).lower()
+        assert "relative" in blob or "consistently scaled" in blob
+        assert "absolute" in blob
+        assert "website" in blob and "0" in blob and "100" in blob
+        assert item.metric_kind == "relative_search_interest"
+        assert item.observation_period_start
+        assert item.observation_period_end
 
 
 def test_default_report_is_deterministic_and_offline():
@@ -208,9 +235,12 @@ def test_attention_evidence_not_marketplace_or_launch_authority():
     assert report.evidence_boundary["supplier_proof"] is False
     assert report.evidence_boundary["launch_authority"] is False
     assert report.evidence_boundary["purchase_intent_authority"] is False
+    assert report.evidence_boundary["sales_or_demand_proof"] is False
     assert report.evidence_category == "OrganicSearchInterestEvidence"
     for item in report.observations:
         assert "price" not in item.to_dict() or item.to_dict().get("price") in (None, "")
+        assert item.absolute_search_volume is None
+        assert item.purchase_intent is None
 
 
 def test_normalize_observation_rejects_absolute_volume_claim():
