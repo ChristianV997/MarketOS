@@ -84,6 +84,39 @@ def test_evidence_coverage_preserves_pillar_modes_and_one_research_step() -> Non
     assert coverage["consumer_attention"]["evidence_refs"] == []
 
 
+@pytest.mark.parametrize(
+    ("freshness", "expected_stale"),
+    [("current", False), ("stale", True)],
+)
+def test_canonical_consumer_attention_area_preserves_manual_freshness(
+    freshness: str, expected_stale: bool
+) -> None:
+    payload = product_payload()
+    payload["candidates"][0]["evidence"].append(
+        {
+            "evidence_id": "attention-manual-1",
+            "area": "consumer_attention",
+            "status": "observed_fact",
+            "evidence_class": "manual",
+            "source_type": "operator",
+            "source_ref": "manual://attention/desk-lamp",
+            "freshness": freshness,
+        }
+    )
+
+    result = build_owner_opportunity_read_model("evaluate", payload).to_dict()
+    coverage = result["opportunities"][0]["evidence_coverage"]["consumer_attention"]
+
+    assert coverage["status"] == "supplied"
+    assert coverage["evidence_classes"] == ["manual"]
+    assert coverage["freshness_statuses"] == [freshness]
+    assert coverage["manual_imported"] is True
+    assert coverage["fixture_only"] is False
+    assert coverage["stale"] is expected_stale
+    assert coverage["evidence_refs"][0]["evidence_id"] == "attention-manual-1"
+    assert coverage["evidence_refs"][0]["freshness"] == freshness
+
+
 def test_evidence_coverage_marks_missing_stale_and_conflicting_pillars() -> None:
     payload = product_payload()
     payload["candidates"][0]["reports"].pop("consumer")

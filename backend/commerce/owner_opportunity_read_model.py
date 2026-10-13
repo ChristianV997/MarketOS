@@ -52,7 +52,11 @@ _FRESHNESS_STATUSES = frozenset({"current", "stale", "future", "unknown"})
 _PILLARS = (
     ("marketplace", "marketplace", frozenset({"competition", "demand", "marketplace", "price"})),
     ("supplier", "supplier", frozenset({"economics", "supplier", "supply"})),
-    ("consumer_attention", "consumer", frozenset({"attention", "consumer", "creative", "engagement"})),
+    (
+        "consumer_attention",
+        "consumer",
+        frozenset({"attention", "consumer", "consumer_attention", "creative", "engagement"}),
+    ),
 )
 
 _ECONOMIC_OUTPUT_FIELDS = frozenset(
