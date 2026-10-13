@@ -4,10 +4,18 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from api.routes.event_access import admit_event_read, event_read_gate
+from backend.identity.errors import WorkspaceAccessDenied
+from backend.identity.http import http_exception
 
 router = APIRouter()
-# The workflow event log is operator evidence. Its records are not workspace-bound, so these routes are
-# operator-only rather than workspace-scoped; the rate-mesh health route carries no event data and stays open.
+# The workflow event log cannot be bound to a workspace: its reads take no workspace argument and no producer writes a
+# workspace into its records, so any read would show one workspace's events to another. Every log read therefore fails
+# closed after the identity gate, and the store is never read. The rate-mesh health route carries no event data and
+# stays open.
+
+
+def _refuse_unscoped_event_log() -> None:
+    raise http_exception(WorkspaceAccessDenied())
 
 
 @router.get("/orchestration/health")
@@ -19,24 +27,20 @@ def platform_health():
 
 @router.get("/orchestration/workflows", dependencies=[Depends(admit_event_read), Depends(event_read_gate)])
 def recent_workflows(limit: int = 50):
-    """Tail of the workflow event log."""
-    from backend.orchestration.event_store import event_store
-    return {"events": event_store.tail(limit)}
+    """Tail of the workflow event log. Fails closed: no read can be bound to a workspace."""
+    _refuse_unscoped_event_log()
 
 
 @router.get("/orchestration/workflows/incomplete", dependencies=[Depends(admit_event_read), Depends(event_read_gate)])
 def incomplete_workflows():
-    """Workflows that started but never completed (crash candidates)."""
-    from backend.orchestration.event_store import event_store
-    return {"incomplete": event_store.incomplete_workflows()}
+    """Workflows that started but never completed. Fails closed: no read can be bound to a workspace."""
+    _refuse_unscoped_event_log()
 
 
 @router.get("/orchestration/workflows/{workflow_id}", dependencies=[Depends(admit_event_read), Depends(event_read_gate)])
 def workflow_detail(workflow_id: str):
-    """Full event trace for one workflow."""
-    from backend.orchestration.event_store import event_store
-    return {"workflow_id": workflow_id,
-            "events": event_store.events_for(workflow_id)}
+    """Full event trace for one workflow. Fails closed: no read can be bound to a workspace."""
+    _refuse_unscoped_event_log()
 
 
 __all__ = ["router"]

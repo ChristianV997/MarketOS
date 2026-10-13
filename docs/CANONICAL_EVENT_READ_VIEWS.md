@@ -48,8 +48,8 @@ The other routes that read or write canonical event data use the same gate:
 registry, bound workspace only; a foreign workflow answers as missing), the
 phase1 readers `/api/phase1/readiness`, `/api/phase1/benchmark-matrix` and
 `/api/phase1/public-market-benchmark` (operator-only; artifact locations are
-reduced to names), and `/orchestration/workflows*` (operator-only; the workflow
-log is not workspace-bound). Identity comes only from the verified bearer token and
+reduced to names), and `/orchestration/workflows*` (fail closed: every caller that
+passes the gate is refused, because the log cannot be bound to a workspace). Identity comes only from the verified bearer token and
 the principal's stored membership; the query, headers and body cannot grant
 access.
 
@@ -74,9 +74,16 @@ access.
 The readiness routes on these surfaces were open before this change and are now
 operator-only. `/orchestration/health` carries no event data and stays open.
 
-Not yet wired: the workflow log is operator-wide rather than bound to a workspace,
-because its records carry a workspace only by convention. Binding it is the
-owner's decision in `backend/orchestration/event_store.py`.
+The workflow log routes (`/orchestration/workflows`, `/orchestration/workflows/incomplete`,
+`/orchestration/workflows/{workflow_id}`) were open to any operator before this change.
+They now pass the identity gate and then answer 403 `workspace_not_authorized`, without
+reading the store, so no workspace can see another workspace's events or probe for a
+workflow id. A same-workspace read is refused too: the store cannot attribute a record
+to a workspace.
+
+Not yet wired: serving the workflow log again needs workspace attribution written by its
+producers (`backend/orchestration/workflow.py`, `transaction.py`, `adapter.py`) and a
+workspace-scoped query in `backend/orchestration/event_store.py`. Both are the owner's decision.
 
 Status: implemented and integration-tested with synthetic principals in
 `tests/integration/test_canonical_events_workspace_authz.py`. Not
