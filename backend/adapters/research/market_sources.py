@@ -90,6 +90,15 @@ class MercadoLibreResearchAdapter(_SignalResearchAdapter):
     fetcher = staticmethod(fetch_mercadolibre)
     confidence_env = "PILLAR_A_SOURCE_MERCADOLIBRE_CONFIDENCE_BASELINE"
 
+    def to_canonical(
+        self,
+        raw_record: dict[str, Any],
+        *,
+        fetched_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        # Listing observations cannot fill the trend store's numeric velocity.
+        raise AdapterFetchError("unavailable", "listing_evidence_is_not_sales_velocity")
+
 
 class YouTubeResearchAdapter(_SignalResearchAdapter):
     name = "youtube_trends"
