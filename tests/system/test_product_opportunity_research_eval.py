@@ -1,4 +1,4 @@
-"""Tests for the fixture-only Product Opportunity Synthesis evaluation harness."""
+"""Tests for fixture evaluation and sanitized live-evidence acceptance."""
 from __future__ import annotations
 
 import copy
@@ -13,10 +13,15 @@ from scripts.ai.operator_task_packet import SECRET_SHAPED
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKET_TEXT = harness.PACKET_PATH.read_text(encoding="utf-8")
+LIVE_PACKET_PATH = ROOT / "tests" / "fixtures" / "product_opportunity_eval" / "live_receipts.json"
 
 
 def _packet() -> dict:
     return json.loads(PACKET_TEXT)
+
+
+def _live_packet() -> dict:
+    return json.loads(LIVE_PACKET_PATH.read_text(encoding="utf-8"))
 
 
 @functools.lru_cache(maxsize=1)
@@ -66,6 +71,136 @@ def test_packet_is_fixture_only_and_secret_free():
             if isinstance(scenario.get(pillar), str):
                 collect(json.loads((ROOT / scenario[pillar]).read_text(encoding="utf-8")))
     assert modes and modes <= {"fixture", "fixture_demo"}, modes
+
+
+def test_fixture_packet_cannot_satisfy_live_evidence_mode():
+    report = harness.evaluate_live_packet(_packet())
+    assert report["acceptance"]["accepted"] is False
+    assert report["acceptance"]["blockers"] == ["live_input_schema_mismatch"]
+    assert report["diagnostic_outcome"] is None
+
+
+def test_valid_live_receipts_are_accepted_without_rewriting_diagnostic_recommendation():
+    report = harness.evaluate_live_packet(_live_packet())
+    assert report["acceptance"]["accepted"] is True
+    assert report["acceptance"]["receipt_counts"] == {pillar: 1 for pillar in harness.PILLARS}
+    assert report["diagnostic_outcome"]["candidate_ids"] == ["candidate-live"]
+    assert report["diagnostic_outcome"]["read_only"] is True
+    assert report["acceptance"]["acceptance_basis"] == "sanitized_receipt_contract_only"
+    assert report["acceptance"]["source_verified"] is False
+    assert report["provider_calls"] is False
+    assert report["mutated"] is False
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "expected"),
+    [
+        (("receipts", "supplier", 0, "is_live"), False, "non_live_receipt"),
+        (("receipts", "supplier", 0, "evidence_class"), "manual", "non_live_receipt"),
+        (("receipts", "supplier", 0, "evidence_mode"), "manual_import", "non_live_receipt"),
+        (("receipts", "supplier", 0, "freshness"), "stale", "stale_receipt"),
+        (("receipts", "supplier", 0, "freshness"), "future_dated", "future_dated_receipt"),
+        (("receipts", "supplier", 0, "freshness"), "unavailable", "unavailable_receipt"),
+        (("receipts", "supplier", 0, "candidate_id"), "hint-only-candidate", "candidate_binding_mismatch"),
+        (("receipts", "supplier", 0, "variant_id"), "other-variant", "variant_binding_mismatch"),
+        (("receipts", "supplier", 0, "currency"), None, "currency_missing_or_malformed"),
+    ],
+)
+def test_live_receipt_metadata_failures_are_distinct_and_blocking(path, value, expected):
+    packet = _live_packet()
+    target = packet
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    report = harness.evaluate_live_packet(packet)
+    assert report["acceptance"]["accepted"] is False
+    assert expected in report["acceptance"]["blockers"]
+
+
+def test_live_mode_requires_explicit_currency_but_preserves_explicit_zero():
+    explicit_zero = _live_packet()
+    offer = explicit_zero["reports"]["supplier"]["candidates"][0]["offers"][0]
+    offer.update({"unit_cost": 0, "shipping_cost": 0, "estimated_landed_cost": 0})
+    assert harness.evaluate_live_packet(explicit_zero)["acceptance"]["accepted"] is True
+
+    missing = _live_packet()
+    del missing["reports"]["supplier"]["candidates"][0]["offers"][0]["unit_cost"]
+    report = harness.evaluate_live_packet(missing)
+    assert report["acceptance"]["accepted"] is False
+    assert "incomplete_viability_evidence" in report["acceptance"]["blockers"]
+
+
+def test_cross_currency_conflict_cannot_be_waived_by_known_gaps():
+    packet = _live_packet()
+    packet["reports"]["supplier"]["candidates"][0]["offers"][0]["currency"] = "EUR"
+    packet["known_gaps"] = [{"id": "intentional", "checks": ["currency_safety_invariant"]}]
+    report = harness.evaluate_live_packet(packet)
+    assert report["acceptance"]["accepted"] is False
+    assert "currency_conflict" in report["acceptance"]["blockers"]
+    assert report["acceptance"]["known_gaps_waived"] is False
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected"),
+    [
+        (lambda packet: packet["receipts"]["consumer"][0].update({"freshness": "stale"}), "stale_receipt"),
+        (lambda packet: packet["reports"]["marketplace"]["candidates"][0]["evidence"][0].update({"price": 10}), "price_conflict"),
+        (lambda packet: packet["reports"]["supplier"]["candidates"][0].update({"query": "different variant"}), "identity_conflict"),
+        (lambda packet: packet["reports"]["supplier"]["candidates"][0]["offers"][0].pop("unit_cost"), "incomplete_viability_evidence"),
+    ],
+)
+def test_live_non_waivable_invariants_ignore_known_gaps(mutate, expected):
+    packet = _live_packet()
+    mutate(packet)
+    packet["known_gaps"] = [{"id": "attempted-waiver", "checks": ["currency_safety_invariant"]}]
+    report = harness.evaluate_live_packet(packet)
+    assert report["acceptance"]["accepted"] is False
+    assert expected in report["acceptance"]["blockers"]
+
+
+def test_fixture_report_mode_cannot_be_hidden_behind_live_receipt_metadata():
+    packet = _live_packet()
+    packet["reports"]["marketplace"]["evidence_mode"] = "fixture_demo"
+    report = harness.evaluate_live_packet(packet)
+    assert report["acceptance"]["accepted"] is False
+    assert "non_live_marketplace_evidence" in report["acceptance"]["blockers"]
+
+
+def test_live_input_rejects_secret_shaped_or_raw_payload_data():
+    packet = _live_packet()
+    packet["receipts"]["marketplace"][0]["raw_payload"] = {"html": "sk_live_synthetic_secret_value"}
+    report = harness.evaluate_live_packet(packet)
+    assert report["acceptance"]["accepted"] is False
+    assert report["acceptance"]["blockers"] == ["raw_or_secret_payload"]
+
+
+@pytest.mark.parametrize(
+    ("pillar", "field"),
+    [("marketplace", "evidence"), ("supplier", "offers"), ("consumer", "freshness_statuses")],
+)
+def test_live_malformed_nested_reports_fail_closed_without_raising(pillar, field):
+    packet = _live_packet()
+    candidate = packet["reports"][pillar]["candidates"][0]
+    candidate[field] = None
+    report = harness.evaluate_live_packet(packet)
+    assert report["acceptance"]["accepted"] is False
+    assert "malformed_report" in report["acceptance"]["blockers"]
+
+
+def test_live_cli_does_not_fallback_to_demo_fixture(capsys):
+    assert harness.main(["--mode", "live_evidence", "--packet", str(LIVE_PACKET_PATH)]) == 0
+    assert json.loads(capsys.readouterr().out)["acceptance"]["accepted"] is True
+    assert harness.main(["--mode", "live_evidence"]) == 2
+    blocked = json.loads(capsys.readouterr().out)
+    assert blocked["acceptance"]["accepted"] is False
+    assert blocked["diagnostic_outcome"] is None
+
+
+def test_live_packet_file_size_is_bounded(tmp_path):
+    path = tmp_path / "oversized.json"
+    path.write_bytes(b"{" + b"x" * harness.LIVE_MAX_PACKET_BYTES)
+    report = harness.evaluate_live_file(path)
+    assert report["acceptance"]["blockers"] == ["live_input_oversized"]
 
 
 def test_known_gaps_are_exactly_the_observed_failures_and_none_is_unexpected():

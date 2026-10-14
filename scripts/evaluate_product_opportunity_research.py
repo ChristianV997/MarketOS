@@ -1,8 +1,9 @@
-"""Deterministic, fixture-only evaluation of Product Opportunity Synthesis.
+"""Deterministic evaluation of Product Opportunity Synthesis inputs.
 
 Measures whether the existing synthesis makes evidence-grounded, appropriately
-cautious decisions on synthetic packets. It adds no score, changes no
-threshold, makes no network call, and writes nothing unless --output is given.
+cautious decisions on synthetic packets or already-collected sanitized receipts.
+It adds no score, changes no threshold, makes no network call, and writes
+nothing unless --output is given.
 
 Expectations in a packet are safety policy written before the run. A failing
 expectation is reported as a known gap only when the packet names that exact
@@ -14,8 +15,10 @@ import argparse
 import copy
 import hashlib
 import json
+import re
 import sys
 from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +29,7 @@ if str(ROOT) not in sys.path:
 from evaluation.commerce.opportunity_synthesis import build_product_opportunity_synthesis  # noqa: E402
 
 SCHEMA = "MarketOS.ProductOpportunityResearchEval.v1"
+LIVE_SCHEMA = "MarketOS.ProductOpportunityLiveEvidence.v1"
 PACKET_PATH = ROOT / "tests" / "fixtures" / "product_opportunity_eval" / "packet.json"
 FIXTURE_PREFIX = "tests/fixtures/"
 PILLARS = ("marketplace", "supplier", "consumer")
@@ -36,6 +40,23 @@ REQUIRED_FIELDS = {
     "consumer": ("platform", "evidence_mode"),
 }
 FRESHNESS_STATES = frozenset({"fresh", "stale", "future_dated", "unavailable"})
+LIVE_RECEIPT_MODES = frozenset({"live_readonly", "actual_executed"})
+LIVE_EVIDENCE_CLASSES = frozenset({"live", "actual_executed"})
+LIVE_REQUIRED_RECEIPT_FIELDS = frozenset({
+    "receipt_id", "provider_id", "source_type", "source_reference", "collected_at",
+    "freshness", "geography", "language", "candidate_id", "variant_id",
+    "evidence_class", "evidence_mode", "is_live", "currency",
+})
+LIVE_MAX_PACKET_BYTES = 256 * 1024
+LIVE_MAX_RECEIPTS_PER_PILLAR = 32
+LIVE_NOT_APPLICABLE_CURRENCY = "not_applicable"
+LIVE_FORBIDDEN_KEYS = frozenset({
+    "raw_payload", "raw_response", "raw_html", "response_body", "stack_trace",
+    "payload", "raw", "html", "body", "response", "exception", "credential",
+    "password", "access_token", "secret", "token",
+})
+SECRET_SHAPED = re.compile(r"(?i)(?:sk_(?:live|test)|gh[pous]_|github_pat_|xox[bap]-|bearer\s+)[A-Za-z0-9_.:/+-]{8,}")
+CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 GRADE_RANK = {"A_live_validated": 4, "B_multi_source_manual": 3, "C_fixture_or_partial": 2, "D_low_confidence": 1, "F_reject_or_missing": 0}
 ADVANCE = "advance_to_launch_draft"
 DRAFT_ACTION = "prepare_launch_draft_for_human_review"
@@ -149,6 +170,273 @@ def load_packet(path: Path = PACKET_PATH) -> dict[str, Any]:
         if not str(gap.get("reason", "")).strip():
             raise ValueError(f"known gap {gap.get('id')} needs a reason")
     return data
+
+
+class _LiveInputError(ValueError):
+    """Internal stable error code; raw input details never reach the report."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+def _has_forbidden_live_data(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if str(key).strip().lower() in LIVE_FORBIDDEN_KEYS:
+                return True
+            if _has_forbidden_live_data(item):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(_has_forbidden_live_data(item) for item in value)
+    return isinstance(value, str) and bool(SECRET_SHAPED.search(value))
+
+
+def _safe_live_text(value: Any, *, limit: int = 256) -> bool:
+    return isinstance(value, str) and bool(value.strip()) and len(value) <= limit and not CONTROL_CHARS.search(value)
+
+
+def _live_timestamp(value: Any) -> bool:
+    if not _safe_live_text(value):
+        return False
+    raw = value.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() is not None
+
+
+def _live_currency(value: Any, pillar: str) -> bool:
+    if pillar == "consumer":
+        return value == LIVE_NOT_APPLICABLE_CURRENCY
+    return isinstance(value, str) and bool(re.fullmatch(r"[A-Z]{3}", value))
+
+
+def _live_receipt_findings(receipt: Any, pillar: str, target: Mapping[str, Any], seen_ids: set[str]) -> set[str]:
+    findings: set[str] = set()
+    if not isinstance(receipt, Mapping):
+        return {"malformed_receipt"}
+    if _has_forbidden_live_data(receipt):
+        findings.add("raw_or_secret_payload")
+    missing = LIVE_REQUIRED_RECEIPT_FIELDS - set(receipt)
+    if missing:
+        findings.add("receipt_metadata_missing")
+    for key in ("receipt_id", "provider_id", "source_type", "source_reference", "geography", "language", "candidate_id", "variant_id"):
+        if not _safe_live_text(receipt.get(key)):
+            findings.add("malformed_receipt")
+    receipt_id = receipt.get("receipt_id")
+    if isinstance(receipt_id, str):
+        if receipt_id in seen_ids:
+            findings.add("duplicate_receipt_id")
+        seen_ids.add(receipt_id)
+    if receipt.get("candidate_id") != target.get("candidate_id"):
+        findings.add("candidate_binding_mismatch")
+    if receipt.get("variant_id") != target.get("variant_id"):
+        findings.add("variant_binding_mismatch")
+    if receipt.get("geography") != target.get("geography") or receipt.get("language") != target.get("language"):
+        findings.add("target_context_mismatch")
+    source_markers = (str(receipt.get("provider_id", "")) + " " + str(receipt.get("source_type", ""))).lower()
+    if any(marker in source_markers for marker in ("fixture", "manual", "simulated", "planned")):
+        findings.add("non_live_receipt")
+    if receipt.get("is_live") is not True or receipt.get("evidence_class") not in LIVE_EVIDENCE_CLASSES or receipt.get("evidence_mode") not in LIVE_RECEIPT_MODES:
+        findings.add("non_live_receipt")
+    freshness = receipt.get("freshness")
+    if freshness not in FRESHNESS_STATES:
+        findings.add("malformed_freshness")
+    elif freshness != "fresh":
+        findings.add(f"{freshness}_receipt")
+    if not _live_timestamp(receipt.get("collected_at")):
+        findings.add("collection_timestamp_missing_or_malformed")
+    if not _live_currency(receipt.get("currency"), pillar):
+        findings.add("currency_missing_or_malformed")
+    return findings
+
+
+def _live_report_findings(report: Any, pillar: str, target: Mapping[str, Any]) -> set[str]:
+    findings: set[str] = set()
+    if not isinstance(report, Mapping):
+        return {f"missing_{pillar}_report"}
+    if _has_forbidden_live_data(report):
+        findings.add("raw_or_secret_payload")
+    modes: set[str] = set()
+    top_mode = report.get("evidence_mode")
+    if top_mode is not None:
+        modes.add(str(top_mode))
+    raw_candidates = report.get("candidates")
+    if not isinstance(raw_candidates, list):
+        findings.add("malformed_report")
+        return findings
+    candidates = _candidates(dict(report))
+    if not candidates:
+        findings.add(f"missing_{pillar}_candidate")
+    for candidate in candidates.values():
+        candidate_mode = candidate.get("evidence_mode")
+        if candidate_mode is not None:
+            modes.add(str(candidate_mode))
+        if candidate.get("candidate_id") != target.get("candidate_id"):
+            findings.add("candidate_binding_mismatch")
+        if "variant_id" in candidate and candidate.get("variant_id") != target.get("variant_id"):
+            findings.add("variant_binding_mismatch")
+        items = candidate.get(EVIDENCE_KEY[pillar], [])
+        if not isinstance(items, list):
+            findings.add("malformed_report")
+            continue
+        statuses = candidate.get("freshness_statuses", [])
+        if not isinstance(statuses, list):
+            findings.add("malformed_report")
+        for item in items:
+            if isinstance(item, Mapping) and item.get("evidence_mode") is not None:
+                modes.add(str(item["evidence_mode"]))
+    if not modes & LIVE_RECEIPT_MODES:
+        findings.add(f"missing_{pillar}_live_mode")
+    if any(mode in {"fixture", "fixture_demo", "manual", "manual_import", "manual_csv_import", "derived", "simulated", "planned"} for mode in modes):
+        findings.add(f"non_live_{pillar}_evidence")
+    return findings
+
+
+def _read_live_packet(path: Path) -> dict[str, Any]:
+    try:
+        with Path(path).open("rb") as handle:
+            raw = handle.read(LIVE_MAX_PACKET_BYTES + 1)
+    except OSError as exc:
+        raise _LiveInputError("live_input_unavailable") from exc
+    if len(raw) > LIVE_MAX_PACKET_BYTES:
+        raise _LiveInputError("live_input_oversized")
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise _LiveInputError("live_input_malformed") from exc
+    if not isinstance(data, dict):
+        raise _LiveInputError("live_input_malformed")
+    return data
+
+
+def load_live_packet(path: Path) -> dict[str, Any]:
+    return _read_live_packet(path)
+
+
+def _live_fingerprint(packet: Mapping[str, Any] | None) -> str | None:
+    if packet is None or _has_forbidden_live_data(packet):
+        return None
+    try:
+        encoded = json.dumps(packet, sort_keys=True).encode("utf-8")
+    except (TypeError, ValueError):
+        return None
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _live_blocked_report(blockers: set[str], *, packet: Mapping[str, Any] | None = None, counts: Mapping[str, int] | None = None) -> dict[str, Any]:
+    return {
+        "schema": LIVE_SCHEMA,
+        "mode": "live_evidence",
+        "input_sha256": _live_fingerprint(packet),
+        "acceptance": {
+            "accepted": False,
+            "status": "blocked",
+            "blockers": sorted(blockers),
+            "required_pillars": list(PILLARS),
+            "receipt_counts": dict(counts or {pillar: 0 for pillar in PILLARS}),
+            "known_gaps_waived": False,
+            "acceptance_basis": "sanitized_receipt_contract_only",
+            "source_verified": False,
+        },
+        "diagnostic_outcome": None,
+        "metrics": None,
+        "read_only": True,
+        "network_calls": False,
+        "mutated": False,
+        "provider_calls": False,
+    }
+
+
+def evaluate_live_packet(packet: Mapping[str, Any]) -> dict[str, Any]:
+    blockers: set[str] = set()
+    if not isinstance(packet, Mapping) or packet.get("schema") != LIVE_SCHEMA or packet.get("mode") != "live_evidence":
+        return _live_blocked_report({"live_input_schema_mismatch"})
+    if _has_forbidden_live_data(packet):
+        return _live_blocked_report({"raw_or_secret_payload"})
+    target = packet.get("target")
+    if not isinstance(target, Mapping):
+        return _live_blocked_report({"target_metadata_missing"}, packet=packet)
+    required_target = ("candidate_id", "variant_id", "geography", "language")
+    if any(not _safe_live_text(target.get(key)) for key in required_target):
+        return _live_blocked_report({"target_metadata_missing_or_malformed"}, packet=packet)
+    receipts = packet.get("receipts")
+    reports = packet.get("reports")
+    if not isinstance(receipts, Mapping) or not isinstance(reports, Mapping):
+        return _live_blocked_report({"live_receipts_or_reports_missing"}, packet=packet)
+    counts = {pillar: len(receipts.get(pillar, [])) if isinstance(receipts.get(pillar), list) else 0 for pillar in PILLARS}
+    seen_ids: set[str] = set()
+    for pillar in PILLARS:
+        pillar_receipts = receipts.get(pillar)
+        if not isinstance(pillar_receipts, list) or not pillar_receipts:
+            blockers.add(f"missing_{pillar}_receipts")
+            continue
+        if len(pillar_receipts) > LIVE_MAX_RECEIPTS_PER_PILLAR:
+            blockers.add("too_many_receipts")
+        for receipt in pillar_receipts:
+            blockers.update(_live_receipt_findings(receipt, pillar, target, seen_ids))
+        blockers.update(_live_report_findings(reports.get(pillar), pillar, target))
+    if blockers:
+        return _live_blocked_report(blockers, packet=packet, counts=counts)
+
+    inputs = {pillar: copy.deepcopy(reports[pillar]) for pillar in PILLARS}
+    snapshot = copy.deepcopy(inputs)
+    metrics = measure(inputs, identity_query_context=packet.get("identity_query_context"))
+    if inputs != snapshot:
+        raise RuntimeError("measure mutated live evidence inputs")
+    result = build_product_opportunity_synthesis(inputs["marketplace"], inputs["supplier"], inputs["consumer"]).to_dict()
+    if inputs != snapshot:
+        raise RuntimeError("synthesis mutated live evidence inputs")
+    out = outcome(result)
+    if metrics["currency_unstated_items"]:
+        blockers.add("currency_missing_or_malformed")
+    if metrics["currency_unreconciled"]:
+        blockers.add("currency_conflict")
+    if metrics["identity_conflicts"]:
+        blockers.add("identity_conflict")
+    if metrics["price_conflicts"]:
+        blockers.add("price_conflict")
+    if metrics["incomplete_items"]:
+        blockers.add("incomplete_viability_evidence")
+    freshness_total = sum(metrics["freshness"][state] for state in ("stale", "future_dated", "unavailable"))
+    if freshness_total:
+        blockers.add("non_fresh_evidence")
+    accepted = not blockers
+    return {
+        "schema": LIVE_SCHEMA,
+        "mode": "live_evidence",
+        "input_sha256": _live_fingerprint(packet),
+        "acceptance": {
+            "accepted": accepted,
+            "status": "accepted" if accepted else "blocked",
+            "blockers": sorted(blockers),
+            "required_pillars": list(PILLARS),
+            "receipt_counts": counts,
+            "known_gaps_waived": False,
+            "acceptance_basis": "sanitized_receipt_contract_only",
+            "source_verified": False,
+        },
+        # This remains the canonical synthesis recommendation for diagnosis only; it does not
+        # authorize a launch, supplier, payment, advertising, or other external action.
+        "diagnostic_outcome": out,
+        "metrics": metrics,
+        "read_only": True,
+        "network_calls": False,
+        "mutated": False,
+        "provider_calls": False,
+    }
+
+
+def evaluate_live_file(path: Path) -> dict[str, Any]:
+    try:
+        return evaluate_live_packet(load_live_packet(path))
+    except _LiveInputError as exc:
+        return _live_blocked_report({exc.code})
 
 
 def _resolve_report(value: Any) -> dict[str, Any] | None:
@@ -565,14 +853,23 @@ def evaluate_packet(packet: dict[str, Any], *, only: set[str] | None = None) -> 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--packet", type=Path, default=PACKET_PATH, help="evaluation packet JSON")
+    parser.add_argument("--mode", choices=("fixture", "live_evidence"), default="fixture", help="input acceptance mode")
     parser.add_argument("--scenario", action="append", default=[], help="limit to one scenario id (repeatable)")
     parser.add_argument("--output", type=Path, help="optional path to write the JSON report")
     args = parser.parse_args(argv)
-    report = evaluate_packet(load_packet(args.packet), only=set(args.scenario) or None)
+    if args.mode == "live_evidence":
+        if args.scenario:
+            report = _live_blocked_report({"scenario_filter_not_supported_in_live_mode"})
+        else:
+            report = evaluate_live_file(args.packet)
+    else:
+        report = evaluate_packet(load_packet(args.packet), only=set(args.scenario) or None)
     text = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.write_text(text, encoding="utf-8")
     print(text, end="")
+    if args.mode == "live_evidence":
+        return 0 if report["acceptance"]["accepted"] else 2
     return 0 if report["checks"]["unexpected_fail"] == 0 else 2
 
 

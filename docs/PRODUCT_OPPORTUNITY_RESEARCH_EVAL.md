@@ -1,9 +1,9 @@
 # Product Opportunity Research Evaluation Harness
 
-A deterministic, fixture-only harness that checks whether the existing
-Product Opportunity Synthesis makes evidence-grounded, appropriately cautious
-decisions. It is an evaluation, not a scorer. It adds no opportunity score,
-changes no decision threshold, and calls no provider.
+A deterministic evaluator that checks whether the existing Product Opportunity
+Synthesis makes evidence-grounded, appropriately cautious decisions. It is an
+evaluation and receipt gate, not a scorer. It adds no opportunity score, changes
+no decision threshold, and calls no provider.
 
 ```text
 packet (synthetic pillar reports + safety expectations + known gaps)
@@ -17,6 +17,21 @@ run_checks(): outcome versus expectation -> pass | known_gap | unexpected_fail
    |
    v
 sorted JSON report (no timestamps, no paths, no raw values)
+
+Already-collected sanitized receipts use a separate `live_evidence` mode:
+
+```text
+versioned receipt packet -> metadata and identity gates -> sanitized pillar reports
+                                      |
+                                      v
+                         receipt acceptance + diagnostic synthesis outcome
+```
+
+`live_evidence` means that the submitted receipt metadata satisfies this
+contract; it does not re-contact a provider or independently verify the source.
+The report explicitly marks `acceptance_basis` as
+`sanitized_receipt_contract_only` and `source_verified: false`. It never falls
+back to the synthetic packet.
 ```
 
 ## Run it
@@ -25,12 +40,21 @@ sorted JSON report (no timestamps, no paths, no raw values)
 python scripts/evaluate_product_opportunity_research.py
 python scripts/evaluate_product_opportunity_research.py --scenario S04_cross_currency_join
 python scripts/evaluate_product_opportunity_research.py --output <path>
+python scripts/evaluate_product_opportunity_research.py --mode live_evidence --packet <sanitized-receipts.json>
 ```
 
 - Exit `0`: no unexpected failures and no hard safety invariant failed.
 - Exit `2`: at least one expectation failed without an allowed gap, or a hard
   safety invariant failed. Hard safety failures cannot be documented away by
   `known_gaps`.
+- `--mode fixture` (the default) reads only the checked-in synthetic packet.
+- `--mode live_evidence` reads only the supplied versioned receipt packet. A
+  missing, malformed, oversized, fixture, manual, stale, future-dated,
+  unavailable, ambiguous, or cross-pillar input returns `accepted: false` and
+  exit `2`; it never loads demo fixtures. A valid receipt packet can still
+  return a cautious synthesis recommendation: that recommendation is
+  diagnostic evidence, not launch, supplier, payment, advertising, or provider
+  authority.
 - A full run takes about 20 seconds, almost all of it interpreter startup and
   imports. It reads the packet and the referenced fixtures, and it writes a file
   only when `--output` is given.
@@ -41,6 +65,7 @@ python scripts/evaluate_product_opportunity_research.py --output <path>
 |---|---|
 | `scripts/evaluate_product_opportunity_research.py` | Harness: measurement, checks, report |
 | `tests/fixtures/product_opportunity_eval/packet.json` | Scenarios, expectations, known gaps |
+| `tests/fixtures/product_opportunity_eval/live_receipts.json` | Sanitized synthetic receipt-contract fixture |
 | `tests/system/test_product_opportunity_research_eval.py` | Harness tests |
 
 The baseline scenario references the existing canonical trio under
@@ -185,14 +210,50 @@ narrowed and a regression test was added. No expectation was changed.
 These are reported, not fixed. Fixing them means changing the synthesis, which
 is owned by its own lane.
 
+## Sanitized live-evidence contract
+
+The versioned `MarketOS.ProductOpportunityLiveEvidence.v1` packet is an input
+contract for receipts already collected by an external adapter. This evaluator
+does not collect them. The packet contains `target` (`candidate_id`,
+`variant_id`, `geography`, and `language`), one or more receipts per required
+pillar, and sanitized `reports` using the same marketplace, supplier, and
+consumer report shapes consumed by synthesis.
+
+Each receipt must contain:
+
+- `provider_id`, `source_type`, and a bounded `source_reference`;
+- timezone-aware `collected_at` and an explicit `freshness` state; only `fresh`
+  is accepted in this mode;
+- exact `candidate_id` and `variant_id` bindings, not a title/query hint;
+- exact target geography and language;
+- `evidence_class` of `live` or `actual_executed`, `evidence_mode` of a live
+  mode, and `is_live: true`;
+- an explicit currency: an ISO-like three-letter currency for marketplace and
+  supplier receipts, or `not_applicable` for attention receipts.
+
+The evaluator rejects raw payload keys, secret-shaped values, fixture/manual/
+derived/simulated/planned evidence, duplicate receipt IDs, oversized input,
+missing metadata, candidate or variant mismatches, stale/future/unavailable
+receipts, and malformed timestamps. Reports must contain all three pillars,
+the target candidate, and a live evidence mode. Missing economics remain
+missing; an explicit numeric zero is not converted to missing or filled in.
+
+After receipt validation, the evaluator reuses `measure()` and the existing
+Product Opportunity Synthesis exactly once. The existing non-waivable currency,
+identity, freshness, price, and completeness invariants remain blocking, and
+`known_gaps` cannot waive them. The output exposes only a deterministic
+fingerprint, acceptance metadata, measured metrics, and the canonical
+diagnostic outcome; it does not persist or echo provider payloads.
+
 ## What it cannot establish
 
 - **Real-world correctness.** The packets are hand-written synthetic fixtures.
   A clean run shows the synthesis behaves as the packet's expectations describe,
   not that any product, price, or supplier is real.
-- **Live validation.** Fixture success is not live validation and must not be
-  cited as such. Every packet pillar is labelled `fixture` or `fixture_demo`, and
-  a test enforces that.
+- **Live validation.** Fixture/manual success is not live validation and must
+  not be cited as such. `live_evidence` accepts a claimed, already-collected
+  sanitized receipt contract only; it does not call or verify a provider, and
+  the receipt's source identity remains an input claim.
 - **Policy correctness.** The expectations are a safety position. A different
   policy could reasonably disagree with `must_not_advance` for a given scenario.
   The expectations are explicit so that a disagreement can be argued in review.
@@ -213,7 +274,8 @@ is owned by its own lane.
   boundaries require benchmarks never to be imported by production code.
 - No credentials, provider calls, customer data, persistence, or external actions.
   A test forbids network, subprocess, and credential access in the harness source.
-- Unmerged work is not used. The harness reads only refreshed `main`.
+- Unmerged work is not used by the fixture packet. The live mode accepts only
+  the packet supplied by its caller and has no dependency on an unmerged runner.
 - Known overlaps, not touched here: PR #478 (titled "fail-closed cross-source
   product identity resolution") and PR #440 (titled "compare evidence currencies
   explicitly") may relate to `GAP-IDENTITY-JOIN-UNFLAGGED` and
@@ -222,5 +284,5 @@ is owned by its own lane.
 
 ## Rollback
 
-Revert the PR, or delete the four added files: the harness, the packet, the test,
-and this document. Nothing imports them.
+Revert the PR, or delete the five owned files: the harness, the two packet
+fixtures, the test, and this document. Nothing imports them.
