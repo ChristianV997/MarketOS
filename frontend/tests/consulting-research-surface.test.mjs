@@ -111,9 +111,12 @@ test("keyboard stays in source order and source has no mutation client", async (
   assert.doesNotMatch(source, /method:\s*["']POST["']|fetch\(/);
   assert.doesNotMatch(page, /Shell|Sidebar/);
   assert.match(page, /type="file"/);
-  assert.match(page, /memory only|memory-only|Memory only/i);
-  assert.match(page, /Reset to fixture/);
+  assert.match(page, /Demo\/fixture — not live evidence/);
+  assert.match(page, /Reset demo fixture/);
+  assert.match(page, /Reset live request/);
+  assert.match(page, /Request live report/);
   assert.doesNotMatch(page, /localStorage|sessionStorage|indexedDB/i);
+  assert.doesNotMatch(page, /workspace_id|workspaceId/);
   assert.match(main, /path:\s*["']\/operator\/consulting-research["']/);
   assert.match(main, /ConsultingResearchSurfacePage/);
 });

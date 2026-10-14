@@ -18,12 +18,23 @@ Import `ConsultingResearchSurfacePage` from `frontend/src/features/consulting-re
 
 ## Operator journey
 
-1. Open `/operator/consulting-research`.
-2. Optionally review the fixture demo packet (blocked / non-success).
-3. Choose a local JSON file produced by `scripts/market_research_report.py` (`report_version: market-research-service-v1`) or an already-shaped `consulting-research-surface-v1` packet.
-4. The browser parses the file in memory only (strict `512 KiB` cap). Invalid, secret-shaped, or mismatched contracts are rejected without echoing payload contents.
-5. Market Research reports are reshaped by `mapMarketResearchReport` into the surface model; no second scorer or evidence authority is introduced.
-6. Inspect sections, conflicts, missing fields, blockers, and the client-safe export preview. Reset returns to the fixture demo.
+1. Open `/operator/consulting-research`. The default mode is the **live authenticated boundary**.
+2. Submit candidate/product query, category, geography, language, and buyer context. The client uses `frontend/src/lib/apiBase.ts` and `credentials: "same-origin"`. It does **not** accept a caller-supplied workspace id as authority and does not store bearer tokens.
+3. Until a verified session provider and gated report route exist, the live panel stays `auth_required` / `unavailable` (see contract below). Failed live requests **never** silently fall back to fixture JSON.
+4. Optionally enable **Demo/fixture — not live evidence** for local development. That path can load a fixture packet or a local JSON file (`market-research-service-v1` / `consulting-research-surface-v1`) in memory only (512 KiB cap). Reset demo returns to the fixture; Reset live clears the live request without entering demo mode.
+5. Inspect sections, conflicts, missing fields, blockers, per-source status, and the client-safe export preview. No second scorer or economics authority is introduced in the UI.
+
+## Live contract handoff (proposed)
+
+| Item | Value |
+|---|---|
+| Endpoint | `POST /api/consulting-research/report` (`LIVE_RESEARCH_REPORT_ENDPOINT`) |
+| Request version | `consulting-live-research-request-v1` |
+| Response shapes | `market-research-service-v1` or `consulting-research-surface-v1` |
+| Auth | Principal-gated; workspace from verified session (`backend/identity/http.py`) |
+| Status today | **Not implemented** on main — frontend reports `unavailable` / `auth_required` |
+
+Backend dependency: mount the route over `services.market_research.build_market_research_report` (or an equivalent CRS projection), wire `get_token_verifier` + `get_workspace_repository`, reject client `workspace_id` authority.
 
 ## Evidence
 
@@ -31,6 +42,7 @@ Classes are `observed`, `manual`, `fixture`, `derived`, `assumed`, and `unavaila
 
 ## Safety boundaries
 
-- No upload endpoint, localStorage/sessionStorage persistence, provider calls, or external requests.
+- No upload endpoint, localStorage/sessionStorage persistence of reports or tokens, or provider credentials in the browser.
 - No approve / spend / publish / launch controls.
-- Canonical producer remains `services.market_research` / `scripts/market_research_report.py`.
+- Demo/fixture is explicit opt-in only and never substitutes for a failed live request.
+- Canonical offline producer remains `services.market_research` / `scripts/market_research_report.py` until the live route exists.

@@ -11,3 +11,15 @@ export {
   localReportRejectionMessage,
   MAX_LOCAL_RESEARCH_REPORT_BYTES,
 } from "./lib/loadLocalResearchReport.ts";
+export {
+  LIVE_RESEARCH_REPORT_ENDPOINT,
+  LIVE_RESEARCH_REQUEST_VERSION,
+  buildLiveResearchRequest,
+  liveResearchBoundaryCopy,
+} from "./contracts/liveResearchReport.ts";
+export { fetchLiveResearchReport, buildLiveResearchReportUrl } from "./lib/liveResearchReportApi.ts";
+export {
+  adaptLiveResearchResponse,
+  observationsFromSurfaceModel,
+  unwrapLiveResearchEnvelope,
+} from "./lib/adaptLiveResearchResponse.ts";
