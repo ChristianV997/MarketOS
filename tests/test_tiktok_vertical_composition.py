@@ -85,9 +85,11 @@ def test_evidence_never_imports_legacy_or_ads_ingress():
 
 
 def test_research_tools_never_represented_as_commercially_available():
-    report = build_tiktok_research_evidence(mode="not_configured")
+    report = build_tiktok_research_evidence()
     data = report.to_dict()
-    assert data["capability_status"] in {"not_configured", "blocked_ineligible_commercial_use"}
+    assert data["capability_status"] == "blocked_ineligible_commercial_use"
+    assert data["operational_capability"] is False
+    assert data["evidence_count"] == 0
     assert data["live_provider_calls"] is False
     assert data["network_calls"] is False
     assert data["execution_authorized"] is False
@@ -96,7 +98,7 @@ def test_research_tools_never_represented_as_commercially_available():
     for surface in research_tool_capabilities():
         assert surface.eligible_for_marketos_commercial_use is False
         assert surface.live_transport_implemented is False
-        assert surface.status == "blocked_ineligible_commercial_use"
+        assert surface.status.startswith("blocked_")
     for blocker in COMMERCIAL_INELIGIBILITY:
         assert blocker in data["blockers"]
     faq = next(item for item in official_citations() if "faq" in item["url"])
@@ -104,7 +106,7 @@ def test_research_tools_never_represented_as_commercially_available():
 
 
 def test_fixture_and_fake_never_become_observed_or_live():
-    fixture = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=SANITIZED)
+    fixture = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=SANITIZED, allow_offline_demo=True)
     assert fixture.evidence_count >= 1
     assert fixture.live_provider_calls is False
     assert fixture.network_calls is False
@@ -114,6 +116,7 @@ def test_fixture_and_fake_never_become_observed_or_live():
 
     fake = build_tiktok_research_evidence(
         mode="fake_transport",
+        allow_offline_demo=True,
         transport=FakeTikTokResearchTransport(
             status="ok",
             rows=(
@@ -154,8 +157,8 @@ def test_live_request_states_fail_closed_and_empty():
 def test_malformed_raw_secret_fail_closed():
     secret = ROOT / "tests" / "fixtures" / "tiktok_research_evidence" / "secret_like_rejected.json"
     raw = ROOT / "tests" / "fixtures" / "tiktok_research_evidence" / "raw_payload_rejected.json"
-    secret_report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=secret)
-    raw_report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=raw)
+    secret_report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=secret, allow_offline_demo=True)
+    raw_report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=raw, allow_offline_demo=True)
     assert secret_report.evidence_count == 0
     assert raw_report.evidence_count == 0
     assert any("secret" in item for item in secret_report.warnings)
@@ -181,7 +184,7 @@ def test_composed_legacy_ingress_stays_retired_and_unread(monkeypatch):
 @requires_retirement
 def test_composed_evidence_does_not_reenable_retired_live_clients():
     # Evidence path remains independent of retired modules even after composition.
-    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=SANITIZED)
+    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=SANITIZED, allow_offline_demo=True)
     blob = str(report.to_dict())
     assert "RAPIDAPI_KEY" not in blob
     assert "TIKTOK_RESEARCH_TOKEN" not in blob

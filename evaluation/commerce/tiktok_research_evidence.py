@@ -39,11 +39,19 @@ from evaluation.companyos.resource_execution_governor import (
     evaluate_execution_request,
 )
 
-REPORT_VERSION = "tiktok-research-evidence-v1"
+REPORT_VERSION = "tiktok-research-evidence-v2"
 SOURCE = "tiktok_research_tools"
 ACCESS_DATE = "2026-10-14"
+DOC_RECHECK_DATE = "2026-10-14"
 
-# Official Research Tools surfaces under TikTok for Developers Research & Insights.
+# Distinct TikTok surfaces evaluated for commercial consumer-attention research.
+EVALUATED_SURFACES = (
+    "research_api",
+    "commercial_content_api",
+    "creative_center",
+    "marketing_api",
+)
+# Backward-compatible alias for Research Tools pair.
 RESEARCH_TOOL_SURFACES = ("research_api", "commercial_content_api")
 
 CAPABILITY_STATUSES = frozenset(
@@ -52,6 +60,8 @@ CAPABILITY_STATUSES = frozenset(
         "manual_import",
         "not_configured",
         "blocked_ineligible_commercial_use",
+        "blocked_no_supported_commercial_attention_source",
+        "blocked_offline_demo_disabled",
         "blocked_live_mode",
         "blocked_by_policy",
         "fake_transport_ok",
@@ -61,11 +71,16 @@ CAPABILITY_STATUSES = frozenset(
     }
 )
 
+OFFLINE_DEMO_MODES = frozenset({"fixture_demo", "manual_import", "fake_transport"})
+
 # Documented blockers for MarketOS commercial operation (not academic research).
 COMMERCIAL_INELIGIBILITY = (
     "tiktok_research_tools_require_approved_research_project",
     "tiktok_faq_commercial_users_ineligible_for_research_tools",
     "academic_research_api_eligibility_does_not_authorize_marketos_commercial_use",
+    "creative_center_website_visibility_is_not_scrape_or_api_permission",
+    "marketing_api_is_advertiser_own_account_not_market_wide_attention",
+    "no_eligible_official_live_source_for_marketos_commercial_attention",
     "no_live_transport_in_this_module",
     "approval_ledger_provider_call_not_granted_by_this_layer",
 )
@@ -148,6 +163,10 @@ class TikTokResearchEvidenceReport:
     next_best_action: str = ""
     fingerprint: str = ""
     observed_at: float = 0.0
+    operational_capability: bool = False
+    offline_demo_allowed: bool = False
+    eligible_live_source: str | None = None
+    no_supported_commercial_attention_source: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -171,14 +190,24 @@ class TikTokResearchEvidenceReport:
             "live_provider_calls": False,
             "read_only": True,
             "mutated": False,
+            "operational_capability": False,
+            "offline_demo_allowed": bool(self.offline_demo_allowed),
+            "eligible_live_source": None,
+            "no_supported_commercial_attention_source": True,
             "next_best_action": self.next_best_action,
             "fingerprint": self.fingerprint,
             "observed_at": self.observed_at,
             "requires_future_approval_or_credentials": [
-                "Human-approved research project only if eligibility changes; MarketOS commercial use remains ineligible under current FAQ",
+                "Eligibility change on TikTok Research Tools FAQ (commercial users currently No)",
                 "Approval Ledger provider_call approval before any future live transport",
                 "Credential references only (never secret values) if a permitted surface ever exists",
                 "Terms/privacy and output-contract review for that surface",
+                "Do not invent approval booleans or a second credential system in this module",
+            ],
+            "canonical_dependency_gaps": [
+                "no_eligible_tiktok_commercial_attention_api_under_current_official_terms",
+                "live_secret_resolution_not_invoked_because_live_transport_absent",
+                "approval_ledger_provider_call_remains_blocked_in_offline_ledger",
             ],
         }
 
@@ -188,45 +217,91 @@ def official_citations() -> tuple[dict[str, str], ...]:
         {
             "title": "Getting Started - Research API",
             "url": "https://developers.tiktok.com/doc/research-api-get-started",
-            "access_date": ACCESS_DATE,
+            "access_date": DOC_RECHECK_DATE,
             "supports": "Research API query flow; approved research client; bearer token; video/account query examples",
         },
         {
             "title": "Research API FAQ",
             "url": "https://developers.tiktok.com/doc/research-api-faq",
-            "access_date": ACCESS_DATE,
-            "supports": "Eligibility criteria link; commercial/creator/advertiser users not eligible; daily quota figures for approved research projects",
+            "access_date": DOC_RECHECK_DATE,
+            "supports": "Commercial/creator/advertiser users not eligible (answer: No.); approved research project required; quotas for approved research only",
         },
         {
             "title": "Getting Started - Commercial Content API",
             "url": "https://developers.tiktok.com/doc/commercial-content-api-getting-started",
-            "access_date": ACCESS_DATE,
-            "supports": "Commercial Content API under Research Tools; approved research client; adlib query examples",
+            "access_date": DOC_RECHECK_DATE,
+            "supports": "Commercial Content API under Research Tools; same approved research-client model as Research API",
         },
         {
             "title": "TikTok Developer Docs Overview",
             "url": "https://developers.tiktok.com/doc/overview",
-            "access_date": ACCESS_DATE,
-            "supports": "Research API and Commercial Content API listed under Research & Insights; Creative Center listed as separate TikTok for Business surface",
+            "access_date": DOC_RECHECK_DATE,
+            "supports": "Research API and Commercial Content API under Research & Insights; Creative Center listed separately",
+        },
+        {
+            "title": "Introduction to Creative Center",
+            "url": "https://ads.tiktok.com/help/article/creative-center",
+            "access_date": DOC_RECHECK_DATE,
+            "supports": "Creative Center is a public website/inspiration hub; login optional for more features; not an official MarketOS research ingest API",
+        },
+        {
+            "title": "TikTok API for Business (Marketing API portal)",
+            "url": "https://business-api.tiktok.com/portal/docs",
+            "access_date": DOC_RECHECK_DATE,
+            "supports": "Advertiser-account Marketing API surface; own-account campaign/reporting, not market-wide competitor attention research",
         },
     )
 
 
 def research_tool_capabilities() -> tuple[TikTokResearchCapability, ...]:
-    notes = (
-        "requires_approved_research_project",
-        "not_eligible_for_creators_advertisers_or_commercial_users_per_faq",
-        "live_transport_absent_in_marketos_this_module",
+    """Capability matrix for evaluated TikTok surfaces (all non-operational today)."""
+    specs = (
+        (
+            "research_api",
+            "blocked_ineligible_commercial_use",
+            (
+                "requires_approved_research_project",
+                "faq_commercial_creator_advertiser_users_not_eligible",
+                "live_transport_absent",
+            ),
+        ),
+        (
+            "commercial_content_api",
+            "blocked_ineligible_commercial_use",
+            (
+                "under_research_tools_same_eligibility_as_research_api",
+                "faq_commercial_creator_advertiser_users_not_eligible",
+                "live_transport_absent",
+            ),
+        ),
+        (
+            "creative_center",
+            "blocked_no_supported_commercial_attention_source",
+            (
+                "public_website_inspiration_hub",
+                "website_visibility_is_not_scrape_permission",
+                "no_official_readonly_ingest_contract_for_marketos",
+            ),
+        ),
+        (
+            "marketing_api",
+            "blocked_no_supported_commercial_attention_source",
+            (
+                "advertiser_own_account_analytics_and_mutation_surface",
+                "not_market_wide_competitor_or_public_attention_evidence",
+                "must_not_be_labeled_as_demand_or_competitor_proof",
+            ),
+        ),
     )
     return tuple(
         TikTokResearchCapability(
             surface=surface,
-            status="blocked_ineligible_commercial_use",
+            status=status,
             eligible_for_marketos_commercial_use=False,
             live_transport_implemented=False,
             notes=notes,
         )
-        for surface in RESEARCH_TOOL_SURFACES
+        for surface, status, notes in specs
     )
 
 
@@ -279,20 +354,22 @@ def _fingerprint(payload: Mapping[str, Any]) -> str:
 
 def build_tiktok_research_evidence(
     *,
-    mode: str = "not_configured",
+    mode: str = "blocked_ineligible_commercial_use",
     fixture_path: str | Path | None = None,
     rows: Sequence[Mapping[str, Any]] | None = None,
     transport: TikTokResearchTransport | None = None,
     transport_request: Mapping[str, Any] | None = None,
     allow_live: bool = False,
+    allow_offline_demo: bool = False,
     workspace_id: str = "offline-tiktok-research",
     observed_at: float | None = None,
 ) -> TikTokResearchEvidenceReport:
-    """Build a TikTok research-tools evidence report.
+    """Build a TikTok research-evidence capability report.
 
-    Default ``mode=not_configured`` returns an honest blocked capability package
-    with zero attention rows. Fixture / manual / fake-transport modes may attach
-    sanitized ConsumerAttentionEvidence via the existing normalizer.
+    Ordinary runtime defaults to ``blocked_ineligible_commercial_use`` with
+    zero evidence rows and ``operational_capability=false``. Fixture / manual /
+    fake-transport paths require explicit ``allow_offline_demo=True`` and are
+    never an operational live capability.
     """
     now = time.time() if observed_at is None else float(observed_at)
     surfaces = research_tool_capabilities()
@@ -304,17 +381,19 @@ def build_tiktok_research_evidence(
         "aggregate_metrics_only_when_supplied",
         "unknown_fields_remain_unknown",
         "fixture_or_manual_evidence_is_not_live_validation",
+        "offline_demo_is_not_operational_capability",
+        "marketing_api_own_account_metrics_are_not_market_attention",
     )
     limitations = (
         "no_live_tiktok_provider_calls_in_this_module",
         "no_credentials_read",
         "no_unofficial_scrape_or_proxy",
         "research_tools_ineligible_for_marketos_commercial_use_per_official_faq",
+        "no_supported_official_commercial_attention_source",
         "does_not_duplicate_generic_consumer_attention_importer_cli",
         "does_not_authorize_ad_creation_spend_messaging_or_publishing",
     )
 
-    # Governor simulation: provider pull stays unauthorized.
     provider = evaluate_execution_request(
         ExecutionDecisionRequest(
             "tiktok-research-provider-pull",
@@ -331,43 +410,73 @@ def build_tiktok_research_evidence(
     )
     blockers = list(COMMERCIAL_INELIGIBILITY) + [f"provider_pull_outcome:{provider.outcome}"]
 
-    if allow_live:
-        return TikTokResearchEvidenceReport(
-            report_version=REPORT_VERSION,
-            source=SOURCE,
-            capability_status="blocked_live_mode",
-            surfaces=surfaces,
-            evidence_mode="blocked",
-            attention_report=None,
-            evidence_count=0,
-            blockers=tuple(blockers) + ("live_mode_requested", "live_transport_not_implemented"),
-            warnings=("live_tiktok_research_tools_calls_are_disabled",),
-            assumptions=assumptions,
-            limitations=limitations,
-            official_citations=citations,
-            next_best_action="keep_research_tools_blocked_use_sanitized_fixture_or_manual_import",
-            fingerprint=_fingerprint({"mode": "blocked_live", "at": now}),
-            observed_at=now,
-        )
-
-    if mode in {"not_configured", "blocked_ineligible_commercial_use"}:
-        status = "blocked_ineligible_commercial_use" if mode == "blocked_ineligible_commercial_use" else "not_configured"
+    def _blocked(
+        *,
+        status: str,
+        evidence_mode: str,
+        extra_blockers: tuple[str, ...] = (),
+        warnings: tuple[str, ...] = (),
+        next_best_action: str,
+        fingerprint_payload: Mapping[str, Any],
+        offline_demo_allowed: bool = False,
+    ) -> TikTokResearchEvidenceReport:
         return TikTokResearchEvidenceReport(
             report_version=REPORT_VERSION,
             source=SOURCE,
             capability_status=status,
             surfaces=surfaces,
-            evidence_mode=status,
+            evidence_mode=evidence_mode,
             attention_report=None,
             evidence_count=0,
-            blockers=tuple(blockers),
-            warnings=("official_research_tools_unavailable_for_marketos_commercial_use",),
+            blockers=tuple(blockers) + extra_blockers,
+            warnings=warnings,
             assumptions=assumptions,
             limitations=limitations,
             official_citations=citations,
-            next_best_action="supply_sanitized_tiktok_fixture_or_manual_snapshot_not_live_research_api",
-            fingerprint=_fingerprint({"mode": status, "at": now}),
+            next_best_action=next_best_action,
+            fingerprint=_fingerprint(dict(fingerprint_payload)),
             observed_at=now,
+            operational_capability=False,
+            offline_demo_allowed=offline_demo_allowed,
+            eligible_live_source=None,
+            no_supported_commercial_attention_source=True,
+        )
+
+    if allow_live:
+        return _blocked(
+            status="blocked_live_mode",
+            evidence_mode="blocked",
+            extra_blockers=("live_mode_requested", "live_transport_not_implemented", "no_eligible_live_source"),
+            warnings=("live_tiktok_commercial_attention_calls_are_disabled",),
+            next_best_action="no_eligible_tiktok_commercial_attention_source_do_not_scrape_or_bypass_policy",
+            fingerprint_payload={"mode": "blocked_live", "at": now},
+        )
+
+    if mode in {
+        "not_configured",
+        "blocked_ineligible_commercial_use",
+        "blocked_no_supported_commercial_attention_source",
+    }:
+        status = mode
+        return _blocked(
+            status=status,
+            evidence_mode=status,
+            warnings=(
+                "no_supported_official_tiktok_source_for_marketos_commercial_attention",
+                "ordinary_runtime_returns_zero_evidence_rows",
+            ),
+            next_best_action="use_non_tiktok_attention_sources_or_generic_manual_importer_not_research_tools_live",
+            fingerprint_payload={"mode": status, "at": now},
+        )
+
+    if mode in OFFLINE_DEMO_MODES and not allow_offline_demo:
+        return _blocked(
+            status="blocked_offline_demo_disabled",
+            evidence_mode="blocked",
+            extra_blockers=("offline_demo_not_enabled", "fixture_rows_are_not_operational_capability"),
+            warnings=("offline_demo_requires_explicit_allow_offline_demo",),
+            next_best_action="keep_blocked_or_pass_allow_offline_demo_only_for_explicit_tests",
+            fingerprint_payload={"mode": mode, "demo": False, "at": now},
         )
 
     warnings: list[str] = []
@@ -470,6 +579,7 @@ def build_tiktok_research_evidence(
                     next_best_action=str(attention.get("next_best_action") or "review_tiktok_attention_offline"),
                     fingerprint=_fingerprint({"mode": mode, "count": len(evidence), "at": now}),
                     observed_at=now,
+                    offline_demo_allowed=True,
                 )
         except (ConsumerAttentionImportError, OSError, ValueError) as exc:
             return TikTokResearchEvidenceReport(
@@ -556,6 +666,7 @@ def build_tiktok_research_evidence(
         next_best_action=str(attention.get("next_best_action") or "review_tiktok_attention_offline"),
         fingerprint=_fingerprint({"mode": capability_status, "count": len(evidence), "at": now}),
         observed_at=now,
+        offline_demo_allowed=True,
     )
 
 
@@ -605,6 +716,9 @@ def _text(value: Any, limit: int = 160) -> str:
 __all__ = [
     "REPORT_VERSION",
     "ACCESS_DATE",
+    "DOC_RECHECK_DATE",
+    "EVALUATED_SURFACES",
+    "OFFLINE_DEMO_MODES",
     "RESEARCH_TOOL_SURFACES",
     "FakeTikTokResearchTransport",
     "TikTokResearchCapability",

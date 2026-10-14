@@ -2,8 +2,13 @@
 
 Delegates to ``evaluation.commerce.tiktok_research_evidence``. No live TikTok
 transport, credentials, scraping, or second organic adapter. Official Research
-Tools remain blocked for MarketOS commercial use; fixture/fake/manual paths
-reuse ``ConsumerAttentionEvidence`` via the existing normalizer.
+Tools remain blocked for MarketOS commercial use; Creative Center website
+visibility is not scrape permission; Marketing API own-account metrics are not
+market-wide attention evidence.
+
+Ordinary runtime returns a precise blocked/unavailable capability with zero
+evidence rows. Fixture/fake offline demos require explicit
+``allow_offline_demo=True`` and never count as operational capability.
 
 Does not register in ``ResearchAdapterRegistry`` (trend-source adapters only).
 Does not edit ``backend.adapters.tiktok_organic`` or TikTok API routes.
@@ -19,6 +24,7 @@ from typing import Any, Mapping, Sequence
 from backend.contracts.adapters import AdapterHealth, SidecarContext
 from evaluation.commerce.tiktok_research_evidence import (
     ACCESS_DATE,
+    DOC_RECHECK_DATE,
     REPORT_VERSION,
     SOURCE,
     FakeTikTokResearchTransport,
@@ -44,8 +50,8 @@ EVIDENCE_TIER = "supplemental_non_live_attention"
 MAX_RETRY_ATTEMPTS = 0
 
 _LIVE_PREREQUISITES = (
-    "TikTok Research Tools eligibility for MarketOS commercial use (currently FAQ-ineligible)",
-    "approved research project client (academic Research Tools path only if eligibility changes)",
+    "TikTok Research Tools eligibility for MarketOS commercial use (FAQ: commercial users No)",
+    "official Creative Center/Marketing API commercial-attention contract (absent)",
     "Approval Ledger provider_call approval",
     "credential reference only (no secret values in repo)",
     "terms/privacy and output-contract review",
@@ -69,6 +75,7 @@ class TikTokResearchBridgeEvidence:
     retry_attempts_allowed: int = MAX_RETRY_ATTEMPTS
     commercial_eligible: bool = False
     live_transport_implemented: bool = False
+    operational_capability: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -84,6 +91,8 @@ class TikTokResearchBridgeEvidence:
             "retry_attempts_allowed": self.retry_attempts_allowed,
             "commercial_eligible": False,
             "live_transport_implemented": False,
+            "operational_capability": False,
+            "eligible_live_source": None,
         }
 
 
@@ -92,10 +101,10 @@ def health() -> AdapterHealth:
         name=SOURCE,
         configured=True,
         reachable=False,
-        capabilities=("fixture_only", "fake_transport", "dry_run_only", "blocked_commercial_research_tools"),
+        capabilities=("blocked_commercial_ineligible", "offline_demo_opt_in_only", "dry_run_only"),
         detail=(
-            f"{SOURCE} offline contract ({REPORT_VERSION}); "
-            f"Research Tools commercial use blocked (docs accessed {ACCESS_DATE})"
+            f"{SOURCE} ({REPORT_VERSION}); no eligible commercial attention source "
+            f"(docs rechecked {DOC_RECHECK_DATE}; FAQ accessed {ACCESS_DATE})"
         ),
     )
 
@@ -106,11 +115,12 @@ def _from_report(report: TikTokResearchEvidenceReport, *, query: str) -> TikTokR
         source=SOURCE,
         observed_at=float(data.get("observed_at") or time.time()),
         query=query,
-        status=str(data.get("capability_status") or "not_configured"),
+        status=str(data.get("capability_status") or "blocked_ineligible_commercial_use"),
         evidence_count=int(data.get("evidence_count") or 0),
         blockers=tuple(str(item) for item in data.get("blockers") or ()),
         warnings=tuple(str(item) for item in data.get("warnings") or ()),
         report=data,
+        operational_capability=False,
     )
 
 
@@ -118,21 +128,22 @@ def fetch_research_evidence(
     query: str,
     *,
     context: SidecarContext,
-    mode: str = "not_configured",
+    mode: str = "blocked_ineligible_commercial_use",
     fixture_path: str | Path | None = None,
     rows: Sequence[Mapping[str, Any]] | None = None,
     transport: TikTokResearchTransport | None = None,
+    allow_offline_demo: bool = False,
 ) -> TikTokResearchBridgeEvidence:
-    """Fail-closed bridge into the offline TikTok research-tools contract.
+    """Fail-closed bridge into the TikTok commercial-attention capability contract.
 
-    ``context.dry_run=False`` never reaches fixture loading; it returns a
-    structured blocked result naming commercial ineligibility and missing
-    live prerequisites.
+    Ordinary dry-run returns blocked/unavailable with zero rows. Offline demos
+    require ``allow_offline_demo=True`` and an explicit fixture/rows/transport.
+    ``context.dry_run=False`` never loads fixtures and returns ``blocked_live_mode``.
     """
     cleaned = " ".join((query or "").split()) or "tiktok-research"
     if not context.dry_run:
         report = build_tiktok_research_evidence(
-            mode="not_configured",
+            mode="blocked_ineligible_commercial_use",
             allow_live=True,
             workspace_id=context.workspace_id or "offline-tiktok-research",
         )
@@ -144,21 +155,21 @@ def fetch_research_evidence(
             status="blocked_live_mode",
             evidence_count=0,
             blockers=bridge.blockers + ("live_mode_requested",) + _LIVE_PREREQUISITES,
-            warnings=bridge.warnings + ("TikTok Research Tools live transport is not implemented.",),
+            warnings=bridge.warnings + ("No eligible TikTok commercial attention live transport.",),
             report={},
+            operational_capability=False,
         )
 
     try:
-        path = fixture_path
-        if mode == "fixture_demo" and path is None and rows is None and transport is None:
-            path = DEFAULT_FIXTURE if DEFAULT_FIXTURE.is_file() else None
+        # Never auto-load DEFAULT_FIXTURE as an operational path.
         report = build_tiktok_research_evidence(
             mode=mode,
-            fixture_path=path,
+            fixture_path=fixture_path,
             rows=rows,
             transport=transport,
             transport_request={"surface": "research_api", "query": cleaned, "dry_run": True},
             allow_live=False,
+            allow_offline_demo=allow_offline_demo,
             workspace_id=context.workspace_id or "offline-tiktok-research",
         )
     except Exception:
@@ -172,6 +183,7 @@ def fetch_research_evidence(
             blockers=("offline_builder_failed",),
             warnings=("TikTok research offline builder failed unexpectedly; details withheld.",),
             report={},
+            operational_capability=False,
         )
     return _from_report(report, query=cleaned)
 
@@ -185,6 +197,8 @@ def to_additional_evidence(evidence: TikTokResearchBridgeEvidence) -> dict[str, 
         "evidence_count": evidence.evidence_count,
         "commercial_eligible": False,
         "live_transport_implemented": False,
+        "operational_capability": False,
+        "eligible_live_source": None,
         "blockers": list(evidence.blockers)[:12],
         "warnings": list(evidence.warnings)[:12],
         "authority": {
@@ -201,7 +215,12 @@ class TikTokResearchEvidenceAdapter:
     """Stateless wrapper; async only for ProductResearchProvider parity."""
 
     async def discover(self, query: str, *, context: SidecarContext) -> Sequence[Mapping[str, Any]]:
-        evidence = fetch_research_evidence(query, context=context, mode="not_configured")
+        evidence = fetch_research_evidence(
+            query,
+            context=context,
+            mode="blocked_ineligible_commercial_use",
+            allow_offline_demo=False,
+        )
         return (to_additional_evidence(evidence),)
 
 

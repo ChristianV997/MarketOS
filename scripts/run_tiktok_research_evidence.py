@@ -1,4 +1,9 @@
-"""Run the offline TikTok Research Tools evidence contract (fixture/fake only)."""
+"""Run the TikTok commercial-attention capability contract (blocked by default).
+
+Ordinary runs report commercial ineligibility / no supported source with zero
+evidence rows. Offline fixture/fake demos require ``--allow-offline-demo`` and
+are never operational live capability.
+"""
 from __future__ import annotations
 
 import argparse
@@ -18,7 +23,15 @@ from evaluation.commerce.tiktok_research_evidence import (  # noqa: E402
 )
 
 DEFAULT_FIXTURE = ROOT / "tests" / "fixtures" / "tiktok_research_evidence" / "sanitized_creative_snapshot.json"
-MODES = ("not_configured", "blocked_ineligible_commercial_use", "fixture_demo", "manual_import", "fake_transport")
+MODES = (
+    "blocked_ineligible_commercial_use",
+    "blocked_no_supported_commercial_attention_source",
+    "not_configured",
+    "fixture_demo",
+    "manual_import",
+    "fake_transport",
+)
+OFFLINE_DEMO_MODES = {"fixture_demo", "manual_import", "fake_transport"}
 
 
 def _path(value: str, *, must_exist: bool = True) -> Path:
@@ -49,8 +62,13 @@ def _write(output_value: str, report: Any) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=MODES, default="not_configured")
+    parser.add_argument("--mode", choices=MODES, default="blocked_ineligible_commercial_use")
     parser.add_argument("--fixture")
+    parser.add_argument(
+        "--allow-offline-demo",
+        action="store_true",
+        help="Required for fixture_demo/manual_import/fake_transport; not an operational capability",
+    )
     parser.add_argument("--allow-live", action="store_true", help="Always blocked; documents fail-closed live request")
     parser.add_argument("--fake-error", action="store_true", help="With fake_transport, return a non-success fake response")
     parser.add_argument("--output")
@@ -64,7 +82,10 @@ def main(argv: list[str] | None = None) -> int:
         fixture = None
         rows = None
         mode = args.mode
-        if mode == "fake_transport":
+        if mode in OFFLINE_DEMO_MODES and not args.allow_offline_demo and not args.allow_live:
+            # Still call builder so the precise blocked_offline_demo_disabled status is produced.
+            pass
+        if mode == "fake_transport" and args.allow_offline_demo:
             sample = [
                 {
                     "candidate_id": "mini-thermal-printer",
@@ -83,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
                 status="error" if args.fake_error else "ok",
                 rows=() if args.fake_error else tuple(sample),
             )
-        elif mode in {"fixture_demo", "manual_import"}:
+        elif mode in {"fixture_demo", "manual_import"} and args.allow_offline_demo:
             fixture = _path(args.fixture) if args.fixture else (DEFAULT_FIXTURE if DEFAULT_FIXTURE.is_file() else None)
             if fixture is None:
                 raise FileNotFoundError("fixture path required for fixture_demo/manual_import")
@@ -93,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
             rows=rows,
             transport=transport,
             allow_live=bool(args.allow_live),
+            allow_offline_demo=bool(args.allow_offline_demo),
         )
         if args.output:
             _write(args.output, report)

@@ -38,14 +38,17 @@ def _live() -> SidecarContext:
     return SidecarContext(workspace_id="test-tiktok-research", run_id="run-1", dry_run=False)
 
 
-def test_default_not_configured_is_blocked_and_empty():
+def test_default_ordinary_runtime_is_blocked_and_empty():
     report = build_tiktok_research_evidence(observed_at=1_700_000_000.0)
     data = report.to_dict()
     assert data["report_version"] == REPORT_VERSION
     assert data["source"] == SOURCE
-    assert data["capability_status"] == "not_configured"
+    assert data["capability_status"] == "blocked_ineligible_commercial_use"
     assert data["evidence_count"] == 0
     assert data["attention_report"] is None
+    assert data["operational_capability"] is False
+    assert data["eligible_live_source"] is None
+    assert data["no_supported_commercial_attention_source"] is True
     assert data["execution_authorized"] is False
     assert data["network_calls"] is False
     assert data["live_provider_calls"] is False
@@ -75,7 +78,7 @@ def test_allow_live_always_blocked():
 
 
 def test_fixture_demo_builds_attention_without_network():
-    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=SANITIZED, observed_at=1_700_000_000.0)
+    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=SANITIZED, allow_offline_demo=True, observed_at=1_700_000_000.0)
     data = report.to_dict()
     assert data["capability_status"] in {"fixture_demo", "partial"}
     assert data["evidence_count"] == 2
@@ -90,7 +93,7 @@ def test_fixture_demo_builds_attention_without_network():
 
 
 def test_manual_import_mode_uses_ad_snapshot_source_type():
-    report = build_tiktok_research_evidence(mode="manual_import", fixture_path=PARTIAL)
+    report = build_tiktok_research_evidence(mode="manual_import", fixture_path=PARTIAL, allow_offline_demo=True)
     assert report.evidence_count == 1
     attention = report.attention_report or {}
     source_types: set[str] = set()
@@ -114,6 +117,7 @@ def test_fake_transport_success():
     )
     report = build_tiktok_research_evidence(
         mode="fake_transport",
+        allow_offline_demo=True,
         transport=FakeTikTokResearchTransport(status="ok", rows=rows),
     )
     assert report.capability_status == "fake_transport_ok"
@@ -124,6 +128,7 @@ def test_fake_transport_success():
 def test_fake_transport_failure():
     report = build_tiktok_research_evidence(
         mode="fake_transport",
+        allow_offline_demo=True,
         transport=FakeTikTokResearchTransport(status="rate_limited"),
     )
     assert report.capability_status == "fake_transport_error"
@@ -138,20 +143,20 @@ def test_malformed_unsupported_mode():
 
 
 def test_secret_like_rows_rejected():
-    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=SECRET)
+    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=SECRET, allow_offline_demo=True)
     assert report.evidence_count == 0
     assert report.capability_status in {"malformed_input", "not_configured"}
     assert any("rejected_secret" in item for item in report.warnings)
 
 
 def test_raw_payload_rows_rejected():
-    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=RAW)
+    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=RAW, allow_offline_demo=True)
     assert report.evidence_count == 0
     assert any("rejected_raw_payload" in item for item in report.warnings)
 
 
 def test_partial_missing_locale_preserved_as_unknown():
-    report = build_tiktok_research_evidence(mode="manual_import", fixture_path=PARTIAL)
+    report = build_tiktok_research_evidence(mode="manual_import", fixture_path=PARTIAL, allow_offline_demo=True)
     assert report.evidence_count == 1
     row = json.loads(PARTIAL.read_text(encoding="utf-8"))[0]
     from backend.adapters.research.consumer_attention import normalize_record
@@ -164,7 +169,7 @@ def test_partial_missing_locale_preserved_as_unknown():
 
 
 def test_stale_or_present_observed_at_not_invented():
-    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=SANITIZED)
+    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=SANITIZED, allow_offline_demo=True)
     attention = report.attention_report or {}
     observed = []
     for candidate in attention.get("candidates") or []:
@@ -176,7 +181,7 @@ def test_stale_or_present_observed_at_not_invented():
 
 
 def test_aggregate_only_no_personal_profile_fields():
-    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=SANITIZED)
+    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=SANITIZED, allow_offline_demo=True)
     blob = json.dumps(report.to_dict())
     for forbidden in ('"user_id"', '"follower_list"', '"email"', '"phone_number"', "lookalike", "oauth_token", "access_token"):
         assert forbidden not in blob.lower()
@@ -185,7 +190,7 @@ def test_aggregate_only_no_personal_profile_fields():
 
 
 def test_no_evidence_class_promotion_to_purchase_or_supplier():
-    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=SANITIZED)
+    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=SANITIZED, allow_offline_demo=True)
     assert report.authority["purchase_evidence"] is False
     assert report.authority["supplier_proof"] is False
     assert report.authority["product_demand"] is False
@@ -203,11 +208,12 @@ def test_official_citations_include_faq_and_access_date():
     assert all(item["access_date"] == ACCESS_DATE for item in cites)
 
 
-def test_research_tool_capabilities_both_surfaces_blocked():
+def test_research_tool_capabilities_all_evaluated_surfaces_blocked():
     surfaces = research_tool_capabilities()
     names = {item.surface for item in surfaces}
-    assert names == {"research_api", "commercial_content_api"}
+    assert names == {"research_api", "commercial_content_api", "creative_center", "marketing_api"}
     assert all(not item.eligible_for_marketos_commercial_use for item in surfaces)
+    assert all(not item.live_transport_implemented for item in surfaces)
 
 
 def test_render_markdown_includes_surfaces_and_citations():
@@ -218,12 +224,13 @@ def test_render_markdown_includes_surfaces_and_citations():
     assert "Research API FAQ" in md
 
 
-def test_bridge_default_not_configured():
+def test_bridge_default_blocked_not_operational():
     evidence = bridge.fetch_research_evidence("mini thermal printer", context=_dry())
-    assert evidence.status == "not_configured"
+    assert evidence.status == "blocked_ineligible_commercial_use"
     assert evidence.evidence_count == 0
     assert evidence.commercial_eligible is False
     assert evidence.live_transport_implemented is False
+    assert evidence.operational_capability is False
 
 
 def test_bridge_fixture_demo():
@@ -232,6 +239,7 @@ def test_bridge_fixture_demo():
         context=_dry(),
         mode="fixture_demo",
         fixture_path=SANITIZED,
+        allow_offline_demo=True,
     )
     assert evidence.evidence_count == 2
     assert evidence.status in {"fixture_demo", "partial"}
@@ -242,7 +250,7 @@ def test_bridge_fixture_demo():
 
 
 def test_bridge_live_context_blocked_empty_report():
-    evidence = bridge.fetch_research_evidence("widget", context=_live(), mode="fixture_demo", fixture_path=SANITIZED)
+    evidence = bridge.fetch_research_evidence("widget", context=_live(), mode="fixture_demo", fixture_path=SANITIZED, allow_offline_demo=True)
     assert evidence.status == "blocked_live_mode"
     assert evidence.evidence_count == 0
     assert evidence.report == {}
@@ -256,7 +264,8 @@ def test_bridge_health_unreachable():
     assert isinstance(health, AdapterHealth)
     assert health.name == SOURCE
     assert health.reachable is False
-    assert "fixture_only" in health.capabilities
+    assert "blocked_commercial_ineligible" in health.capabilities
+    assert "offline_demo_opt_in_only" in health.capabilities
 
 
 def test_bridge_fake_transport_via_rows():
@@ -264,6 +273,7 @@ def test_bridge_fake_transport_via_rows():
         "portable blender",
         context=_dry(),
         mode="fake_transport",
+        allow_offline_demo=True,
         transport=FakeTikTokResearchTransport(
             status="ok",
             rows=(
@@ -281,21 +291,31 @@ def test_bridge_fake_transport_via_rows():
     assert evidence.evidence_count == 1
 
 
-def test_cli_default_not_configured(capsys):
+def test_cli_default_blocked_zero_rows(capsys):
     from scripts.run_tiktok_research_evidence import main
 
     assert main(["--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["capability_status"] == "not_configured"
+    assert payload["capability_status"] == "blocked_ineligible_commercial_use"
     assert payload["evidence_count"] == 0
+    assert payload["operational_capability"] is False
 
 
-def test_cli_fixture_demo(capsys):
+def test_cli_fixture_demo_requires_allow_flag(capsys):
     from scripts.run_tiktok_research_evidence import main
 
     assert main(["--mode", "fixture_demo", "--fixture", str(SANITIZED.relative_to(ROOT)), "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
+    assert payload["capability_status"] == "blocked_offline_demo_disabled"
+    assert payload["evidence_count"] == 0
+
+def test_cli_fixture_demo_with_allow_flag(capsys):
+    from scripts.run_tiktok_research_evidence import main
+
+    assert main(["--mode", "fixture_demo", "--allow-offline-demo", "--fixture", str(SANITIZED.relative_to(ROOT)), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
     assert payload["evidence_count"] == 2
+    assert payload["operational_capability"] is False
 
 
 def test_cli_allow_live_blocked(capsys):
@@ -309,7 +329,7 @@ def test_cli_allow_live_blocked(capsys):
 def test_cli_fake_error(capsys):
     from scripts.run_tiktok_research_evidence import main
 
-    assert main(["--mode", "fake_transport", "--fake-error", "--json"]) == 0
+    assert main(["--mode", "fake_transport", "--allow-offline-demo", "--fake-error", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["capability_status"] == "fake_transport_error"
 
@@ -317,14 +337,35 @@ def test_cli_fake_error(capsys):
 def test_malformed_fixture_path(tmp_path: Path):
     bad = tmp_path / "not-json.txt"
     bad.write_text("nope", encoding="utf-8")
-    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=bad)
+    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=bad, allow_offline_demo=True)
     assert report.capability_status == "malformed_input"
 
 
 def test_non_tiktok_platform_row_rejected():
     report = build_tiktok_research_evidence(
         mode="fixture_demo",
+        allow_offline_demo=True,
         rows=[{"candidate_id": "x", "query": "x", "platform": "meta", "hook": "h", "view_count": 1}],
     )
     assert report.evidence_count == 0
     assert any("platform_not_tiktok" in item or "normalize_rejected" in item for item in report.warnings)
+
+
+def test_offline_demo_without_flag_returns_zero_rows():
+    report = build_tiktok_research_evidence(mode="fixture_demo", fixture_path=SANITIZED)
+    assert report.capability_status == "blocked_offline_demo_disabled"
+    assert report.evidence_count == 0
+    assert report.operational_capability is False
+
+
+def test_report_never_claims_operational_live_capability():
+    for kwargs in (
+        {},
+        {"mode": "fixture_demo", "fixture_path": SANITIZED, "allow_offline_demo": True},
+        {"allow_live": True},
+    ):
+        data = build_tiktok_research_evidence(**kwargs).to_dict()
+        assert data["operational_capability"] is False
+        assert data["eligible_live_source"] is None
+        assert data["live_provider_calls"] is False
+        assert data["network_calls"] is False
