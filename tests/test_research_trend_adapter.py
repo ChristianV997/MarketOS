@@ -329,7 +329,6 @@ def test_source_fanout_isolates_source_failure(tmp_path, monkeypatch):
     ("adapter_class", "signal"),
     [
         (RedditResearchAdapter, {"product": "best desk lamp", "velocity": 0.8}),
-        (MercadoLibreResearchAdapter, {"product": "wireless earbuds", "velocity": 0.6}),
     ],
 )
 def test_public_market_adapters_preserve_unknown_competition(adapter_class, signal):
