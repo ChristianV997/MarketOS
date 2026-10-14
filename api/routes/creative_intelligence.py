@@ -3,7 +3,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, Query
 from backend.identity.operator_gates import creative_intelligence_run_gate
 from backend.identity.workspaces import WorkspaceAccess
-from api.routes._workspace_binding import bound_opportunity_id, bound_workspace, owned_angles
+from api.routes._workspace_binding import bound_opportunity_id, bound_workspace, owned_angles, owned_or_none, verified_workspace
 from backend.creative_intelligence.buyer_psychology import build_buyer_psychology_map
 from backend.creative_intelligence.angle_generator import generate_creative_angles
 from backend.creative_intelligence.hook_generator import generate_hooks_for_angles
@@ -30,23 +30,23 @@ def hooks(payload:dict[str,Any]=Body(default={}),access:WorkspaceAccess=Depends(
  reg=get_creative_registry(); ids=payload.get("angle_ids",[])[:500]
  return {"status":"completed","hooks":[x.to_dict() for x in generate_hooks_for_angles(owned_angles(reg,ids,workspace),_cap(payload.get("hooks_per_angle",5),10))]}
 @router.get("/reports")
-def reports(workspace_id:str|None=None,opportunity_id:str|None=None,product_name:str|None=None,category_name:str|None=None,limit:int=Query(50,le=500)):return {"status":"completed","reports":[x.to_dict() for x in get_creative_registry().list_reports(workspace_id,opportunity_id,product_name,category_name,limit=limit)]}
+def reports(workspace_id:str|None=None,opportunity_id:str|None=None,product_name:str|None=None,category_name:str|None=None,limit:int=Query(50,le=500),access:WorkspaceAccess=Depends(creative_intelligence_run_gate)):return {"status":"completed","reports":[x.to_dict() for x in get_creative_registry().list_reports(verified_workspace(workspace_id,access),opportunity_id,product_name,category_name,limit=limit)]}
 @router.get("/reports/{report_id}")
-def report(report_id:str):
- x=get_creative_registry().get_report(report_id);return x.to_dict() if x else {"status":"not_found","report_id":report_id}
+def report(report_id:str,access:WorkspaceAccess=Depends(creative_intelligence_run_gate)):
+ x=owned_or_none(get_creative_registry().get_report(report_id),access.workspace_id);return x.to_dict() if x else {"status":"not_found","report_id":report_id}
 def _items(name,workspace_id=None,opportunity_id=None,product_name=None,angle_id=None,limit=50):
  reg=get_creative_registry();return {"status":"completed",name:[x.to_dict() for x in getattr(reg,"list_"+name)(workspace_id,opportunity_id,product_name,None,angle_id,limit)]}
 @router.get("/angles")
-def list_angles(workspace_id:str|None=None,opportunity_id:str|None=None,product_name:str|None=None,limit:int=Query(100,le=500)):return _items("angles",workspace_id,opportunity_id,product_name,limit=limit)
+def list_angles(workspace_id:str|None=None,opportunity_id:str|None=None,product_name:str|None=None,limit:int=Query(100,le=500),access:WorkspaceAccess=Depends(creative_intelligence_run_gate)):return _items("angles",verified_workspace(workspace_id,access),opportunity_id,product_name,limit=limit)
 @router.get("/hooks")
-def list_hooks(workspace_id:str|None=None,angle_id:str|None=None,opportunity_id:str|None=None,limit:int=Query(200,le=500)):return _items("hooks",workspace_id,opportunity_id,angle_id=angle_id,limit=limit)
+def list_hooks(workspace_id:str|None=None,angle_id:str|None=None,opportunity_id:str|None=None,limit:int=Query(200,le=500),access:WorkspaceAccess=Depends(creative_intelligence_run_gate)):return _items("hooks",verified_workspace(workspace_id,access),opportunity_id,angle_id=angle_id,limit=limit)
 @router.get("/ugc-briefs")
-def list_ugc(workspace_id:str|None=None,opportunity_id:str|None=None,limit:int=Query(100,le=500)):return _items("ugc_briefs",workspace_id,opportunity_id,limit=limit)
+def list_ugc(workspace_id:str|None=None,opportunity_id:str|None=None,limit:int=Query(100,le=500),access:WorkspaceAccess=Depends(creative_intelligence_run_gate)):return _items("ugc_briefs",verified_workspace(workspace_id,access),opportunity_id,limit=limit)
 @router.get("/storyboards")
-def list_storyboards(workspace_id:str|None=None,opportunity_id:str|None=None,limit:int=Query(100,le=500)):return _items("storyboards",workspace_id,opportunity_id,limit=limit)
+def list_storyboards(workspace_id:str|None=None,opportunity_id:str|None=None,limit:int=Query(100,le=500),access:WorkspaceAccess=Depends(creative_intelligence_run_gate)):return _items("storyboards",verified_workspace(workspace_id,access),opportunity_id,limit=limit)
 @router.get("/claim-maps")
-def list_claim_maps(workspace_id:str|None=None,opportunity_id:str|None=None,limit:int=Query(50,le=500)):return _items("claim_maps",workspace_id,opportunity_id,limit=limit)
+def list_claim_maps(workspace_id:str|None=None,opportunity_id:str|None=None,limit:int=Query(50,le=500),access:WorkspaceAccess=Depends(creative_intelligence_run_gate)):return _items("claim_maps",verified_workspace(workspace_id,access),opportunity_id,limit=limit)
 @router.get("/test-matrices")
-def list_matrices(workspace_id:str|None=None,opportunity_id:str|None=None,limit:int=Query(50,le=500)):return _items("test_matrices",workspace_id,opportunity_id,limit=limit)
+def list_matrices(workspace_id:str|None=None,opportunity_id:str|None=None,limit:int=Query(50,le=500),access:WorkspaceAccess=Depends(creative_intelligence_run_gate)):return _items("test_matrices",verified_workspace(workspace_id,access),opportunity_id,limit=limit)
 @router.post("/claims/validate")
 def validate_claim(payload:dict[str,Any]=Body(default={}),_access:WorkspaceAccess=Depends(creative_intelligence_run_gate)):return sanitize_creative_claim(str(payload.get("claim","") or ""),[],payload)
