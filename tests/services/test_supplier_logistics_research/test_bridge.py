@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 from decimal import Decimal
+import json
 
 import pytest
 
-from backend.economics.kernel import CurrencyMismatchError, Money
+from backend.economics.kernel import CurrencyMismatchError, EconomicsError, Money
 from services.supplier_logistics_research import (
     build_offer_from_supplier_evidence,
     build_report_from_supplier_evidence,
@@ -58,12 +59,13 @@ def test_missing_shipping_stays_missing_in_kernel_evidence(offer_factory):
     assert scenario.supplier_shipping.evidence_state == "unknown"
 
 
-def test_missing_shipping_currency_does_not_infer_product_currency(offer_factory):
+@pytest.mark.parametrize("shipping_currency", [None, "", "   "])
+def test_missing_or_blank_shipping_currency_does_not_infer_product_currency(offer_factory, shipping_currency):
     from backend.adapters.research.supplier_feasibility import import_json
     from pathlib import Path
 
     record = import_json(Path(__file__).resolve().parents[2] / "fixtures" / "supplier_feasibility" / "cj_validation_pack_success.json", supplier="cj", source_type="cj_validation_pack_report")[0]
-    record = replace(record, shipping_currency=None)
+    record = replace(record, shipping_currency=shipping_currency)
     report = build_report_from_supplier_evidence(
         record,
         target_price=Money("50", "USD", source="operator_input", provenance="assumed", evidence_state="assumed"),
@@ -76,6 +78,41 @@ def test_missing_shipping_currency_does_not_infer_product_currency(offer_factory
     assert "supplier_shipping" in result.missing_inputs
     assert result.supplier_shipping.source == "assumed_supplier_shipping"
     assert result.supplier_shipping.evidence_state == "unknown"
+
+
+@pytest.mark.parametrize("shipping_currency", ["US", "USDX", "USD!", "not-a-currency"])
+def test_malformed_shipping_currency_fails_at_canonical_money_boundary(offer_factory, shipping_currency):
+    from backend.adapters.research.supplier_feasibility import import_json
+    from pathlib import Path
+
+    record = import_json(Path(__file__).resolve().parents[2] / "fixtures" / "supplier_feasibility" / "cj_validation_pack_success.json", supplier="cj", source_type="cj_validation_pack_report")[0]
+
+    with pytest.raises(EconomicsError, match="invalid currency"):
+        build_offer_from_supplier_evidence(replace(record, shipping_currency=shipping_currency))
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("unit_cost", "NaN"),
+        ("unit_cost", "Infinity"),
+        ("unit_cost", -1),
+        ("unit_cost", "not-a-number"),
+        ("shipping_cost", float("nan")),
+        ("shipping_cost", float("inf")),
+        ("shipping_cost", -1),
+        ("shipping_cost", "not-a-number"),
+    ],
+)
+def test_invalid_cost_values_fail_closed_before_report_arithmetic(offer_factory, field_name, value):
+    from backend.adapters.research.supplier_feasibility import import_json
+    from pathlib import Path
+
+    record = import_json(Path(__file__).resolve().parents[2] / "fixtures" / "supplier_feasibility" / "cj_validation_pack_success.json", supplier="cj", source_type="cj_validation_pack_report")[0]
+    record = replace(record, **{field_name: value, "shipping_currency": "USD"})
+
+    with pytest.raises(ValueError, match=f"invalid {field_name}"):
+        build_offer_from_supplier_evidence(record)
 
 
 def test_source_url_survives_evidence_ref_and_report_serialization(offer_factory):
@@ -96,6 +133,23 @@ def test_source_url_survives_evidence_ref_and_report_serialization(offer_factory
     assert evidence_ref is not None
     assert evidence_ref.source_url == source_url
     assert report.to_dict()["offer"]["goods"]["supplier_evidence"]["evidence_ref"]["source_url"] == source_url
+
+
+def test_candidate_and_supplier_variant_identity_remain_distinct(offer_factory):
+    from backend.adapters.research.supplier_feasibility import import_json
+    from pathlib import Path
+
+    record = import_json(Path(__file__).resolve().parents[2] / "fixtures" / "supplier_feasibility" / "cj_validation_pack_success.json", supplier="cj", source_type="cj_validation_pack_report")[0]
+    record = replace(record, candidate_id="candidate-alpha", supplier_product_id="offer-beta", supplier_sku="variant-gamma")
+    offer = build_offer_from_supplier_evidence(record)
+
+    assert offer.identity.candidate_id == "candidate-alpha"
+    assert offer.identity.supplier_offer.offer_id == "offer-beta"
+    assert offer.identity.supplier_offer.supplier_sku == "variant-gamma"
+    assert offer.identity.candidate_id not in {
+        offer.identity.supplier_offer.offer_id,
+        offer.identity.supplier_offer.supplier_sku,
+    }
 
 
 def test_explicit_zero_shipping_is_not_missing(offer_factory):
@@ -242,6 +296,31 @@ def test_missing_logistics_facts_stay_unknown_and_blocked(offer_factory):
     }
     assert any("logistics: evidence is missing" in blocker for blocker in report.blockers)
     assert any("shipping_cost: evidence is missing" in blocker for blocker in report.blockers)
+
+
+def test_report_serialization_is_stable_when_provenance_input_order_changes(offer_factory):
+    from backend.adapters.research.supplier_feasibility import import_json
+    from pathlib import Path
+
+    record = import_json(Path(__file__).resolve().parents[2] / "fixtures" / "supplier_feasibility" / "cj_validation_pack_success.json", supplier="cj", source_type="cj_validation_pack_report")[0]
+    record = replace(record, shipping_currency="USD")
+    provenance = list(record.field_provenance.items())
+    first = replace(record, field_provenance=dict(provenance))
+    second = replace(record, field_provenance=dict(reversed(provenance)))
+    target = Money("50", "USD", source="operator_input", provenance="assumed", evidence_state="assumed")
+
+    first_json = json.dumps(
+        build_report_from_supplier_evidence(first, target_price=target, generated_at=GENERATED_AT).to_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    second_json = json.dumps(
+        build_report_from_supplier_evidence(second, target_price=target, generated_at=GENERATED_AT).to_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    assert first_json == second_json
 
 
 def test_normalized_cj_candidate_record_reaches_canonical_landed_cost_report(offer_factory):
