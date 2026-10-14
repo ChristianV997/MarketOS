@@ -28,10 +28,11 @@ from backend.identity.operator_gates import (
 from backend.identity.principal import VerifiedPrincipal
 from backend.identity.roles import CLIENT_VIEWER, INTERNAL_OPERATOR
 
-from .conftest import ALICE, ISSUER, OWNER_ALICE, OWNER_BOB
+from .conftest import ALICE, BOB, CAROL, ISSUER, OWNER_ALICE, OWNER_BOB
 
 VIEWER = VerifiedPrincipal(ISSUER, "user_viewer")
-TOKENS = {"tok-operator": ALICE, "tok-viewer": VIEWER}
+# CAROL is authenticated and a member of nothing; BOB operates two internal workspaces (see ``store``).
+TOKENS = {"tok-operator": ALICE, "tok-viewer": VIEWER, "tok-stranger": CAROL, "tok-dual": BOB}
 OPERATOR_HEADERS = {"Authorization": "Bearer tok-operator"}
 
 # (wiring, headers, expected status, expected code). Wiring says which identity providers the app has.
@@ -39,6 +40,8 @@ REFUSALS = [
     pytest.param("wired", {}, 401, "missing_credentials", id="anonymous"),
     pytest.param("wired", {"Authorization": "Bearer tok-forged"}, 401, "invalid_credentials", id="forged-token"),
     pytest.param("wired", {"Authorization": "Bearer tok-viewer"}, 403, "role_not_authorized", id="client-viewer"),
+    pytest.param("wired", {"Authorization": "Bearer tok-stranger"}, 403, "no_workspace_membership", id="no-workspace"),
+    pytest.param("wired", {"Authorization": "Bearer tok-dual"}, 403, "workspace_ambiguous", id="ambiguous-workspace"),
     pytest.param("no_verifier", OPERATOR_HEADERS, 503, "identity_provider_unavailable", id="unconfigured-verifier"),
     pytest.param("no_repository", OPERATOR_HEADERS, 503, "storage_unavailable", id="unconfigured-repository"),
 ]
@@ -337,6 +340,10 @@ def store(repo):
     repo.add_member(OWNER_ALICE, ALICE.issuer, ALICE.subject, INTERNAL_OPERATOR)
     # A client_viewer in the internal workspace: the membership exists, and the role must still refuse.
     repo.add_member(OWNER_ALICE, VIEWER.issuer, VIEWER.subject, CLIENT_VIEWER)
+    # An operator of two internal workspaces: the gate cannot pick one, and no request value may pick it either.
+    repo.create_workspace(OWNER_BOB, "internal", "Other Owner Workspace")
+    repo.add_member(OWNER_ALICE, BOB.issuer, BOB.subject, INTERNAL_OPERATOR)
+    repo.add_member(OWNER_BOB, BOB.issuer, BOB.subject, INTERNAL_OPERATOR)
     return repo
 
 
