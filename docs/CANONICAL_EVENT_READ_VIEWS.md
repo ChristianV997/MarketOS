@@ -81,9 +81,16 @@ reading the store, so no workspace can see another workspace's events or probe f
 workflow id. A same-workspace read is refused too: the store cannot attribute a record
 to a workspace.
 
-Not yet wired: serving the workflow log again needs workspace attribution written by its
-producers (`backend/orchestration/workflow.py`, `transaction.py`, `adapter.py`) and a
-workspace-scoped query in `backend/orchestration/event_store.py`. Both are the owner's decision.
+Not yet wired: serving the workflow log again needs trustworthy workspace attribution and a
+workspace-scoped query in `backend/orchestration/event_store.py`. Neither exists today.
+Most workflow producers (`backend/orchestration/workflow.py`, `transaction.py`, `adapter.py`,
+`agents/hierarchy.py`, the `backend/commerce` modules) write no workspace. The records that do
+carry `data.workspace_id` take it from the `workspace` string an unauthenticated caller passes
+to `/api/services/*`: every commerce-service transition (`backend/experiments/audit_log.py`) and
+the live-approval check (`backend/workspaces/live_mode_checklist.py`). `_resolve_workspace` in
+`api/routes/services.py` also registers unknown names. A caller can therefore attribute
+workflow records to any workspace. `backend/ledger/events.py` stamps a workspace but has no
+production caller. Fixing `/api/services/*` identity and attribution is the owner's decision.
 
 Status: implemented and integration-tested with synthetic principals in
 `tests/integration/test_canonical_events_workspace_authz.py`. Not
