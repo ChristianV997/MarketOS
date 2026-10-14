@@ -1134,3 +1134,37 @@ def test_bridge_fails_closed_when_the_offline_builder_raises_and_never_echoes_th
     assert report.blockers == ("offline_builder_failed",)
     _assert_no_canary(json.dumps(report.to_dict()))
     assert "/private/root" not in json.dumps(report.to_dict())
+
+
+@pytest.mark.parametrize("country", ["DE", "FR", "GB"])
+def test_coverage_names_eu_and_uk_delivery_as_the_recorded_commercial_scope(country):
+    report = contract.make_report("ok", search_terms="synthetic kitchen organiser", country=country, observed_at=OBSERVED_AT)
+
+    assert report.coverage["commercial_scope"] == contract.COMMERCIAL_SCOPE_DOCUMENTED
+    assert report.coverage["zero_records_are_absence_evidence"] is False
+
+
+@pytest.mark.parametrize("country", ["MX", "BR", "AR", "US"])
+def test_coverage_does_not_document_ordinary_ads_outside_eu_and_uk(country):
+    report = contract.make_report("ok", search_terms="synthetic kitchen organiser", country=country, observed_at=OBSERVED_AT)
+
+    assert report.coverage["commercial_scope"] == contract.COMMERCIAL_SCOPE_NOT_DOCUMENTED
+    assert report.coverage["zero_records_are_absence_evidence"] is False
+    assert report.records == ()
+
+
+def test_the_live_block_names_the_mexico_and_latin_america_limit():
+    report = bridge.fetch_ad_library_evidence(
+        "synthetic kitchen organiser", country="MX", context=_live(), observed_at=OBSERVED_AT
+    )
+
+    assert report.response_status == "blocked_live_mode"
+    assert any(item.startswith("Mexico and Latin America") for item in report.blockers)
+    assert any("primary Meta pages re-read" in item for item in report.blockers)
+
+
+def test_the_scope_table_is_the_27_member_states_plus_the_uk_only():
+    assert len(contract._EU_MEMBER_STATES) == 27
+    assert contract._DOCUMENTED_COMMERCIAL_COUNTRIES == contract._EU_MEMBER_STATES | {"GB"}
+    assert "CH" not in contract._DOCUMENTED_COMMERCIAL_COUNTRIES
+    assert "MX" not in contract._DOCUMENTED_COMMERCIAL_COUNTRIES

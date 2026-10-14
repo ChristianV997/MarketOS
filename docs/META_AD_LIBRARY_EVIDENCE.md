@@ -2,7 +2,9 @@
 
 Status: **implemented and fixture-tested; dry-run bridge only.** Not integration-tested. Not live-validated. No provider has been called and no credential has been used. A fixture is not an authenticated observation and not a performance outcome.
 
-Primary pages read on **2026-10-13** (UTC). This reading does not authorize a live call.
+**Primary-source status, checked 2026-10-14 (UTC): not re-verified.** Every primary Meta page was unreachable from this session (see *Research log, 2026-10-14*). The quotations and rules below are the record of a 2026-10-13 session. They are carried forward as **unverified until re-read from an allowed host**. This reading does not authorize a live call.
+
+Verdict for MarketOS's target market (Mexico): the Ad Library API, as recorded, does not document ordinary commercial ads for Mexico. See *Target market: Mexico and Latin America*.
 
 | Capability | State |
 |---|---|
@@ -12,7 +14,7 @@ Primary pages read on **2026-10-13** (UTC). This reading does not authorize a li
 | Live transport | Not implemented |
 | Use in scoring, attention, purchases, or supplier evidence | Not implemented, deliberately |
 
-## Primary sources read
+## Primary sources recorded (2026-10-13; not re-read on 2026-10-14)
 
 | Page | What it is |
 |---|---|
@@ -26,9 +28,9 @@ Primary pages read on **2026-10-13** (UTC). This reading does not authorize a li
 
 No undocumented endpoint was called. Meta was not called. Marketing API rate limits and Content Library rate limits are different products and are not applied here.
 
-## Confirmed versus unknown
+## Recorded facts versus unknown (2026-10-13 read, unverified on 2026-10-14)
 
-Confirmed from the pages above:
+Recorded as read from the pages above on 2026-10-13. None of this was re-checked on 2026-10-14:
 
 - Access, from the Ad Library API page: a Facebook account; identity and location confirmation at `facebook.com/ID` (the same process required to run ads about social issues, elections or politics; confirmation can take a few days); a Meta for Developers account that agrees to the Platform Policy; then **Access the API** and a new app. The documented example query includes an access token parameter. The FAQ question "Do I need an access token?" was listed, and its answer was not in the fetched page, so token type is not established.
 - Searchable scope, from that same page: ads about social issues, elections or politics delivered anywhere in the world during the past 7 years; ads of any type delivered to the United Kingdom or the European Union during the past year.
@@ -54,6 +56,54 @@ Not established, and not collapsed into one rule:
 - That the API returns commercial ads that reached neither the EU nor the UK and are not about social issues, elections, or politics. The landing page does not say that. The separate Ad Library website is described as a search of active ads; that is not this API.
 - Any performance outcome: clicks, conversions, purchases, ROAS, or exact spend. The documented spend and impression values are ranges, and only in the political-and-issue scope above.
 
+## Research log, 2026-10-14 (UTC)
+
+Attempts from this session. No Meta endpoint or page was called with a credential, and no page was scraped.
+
+| Attempt | Result |
+|---|---|
+| Direct HTTPS to `https://developers.facebook.com/docs/graph-api/reference/ads_archive/` | Refused by the sandbox egress proxy with `403` (destination host not allowed for this session). Not retried, per the proxy policy. |
+| Web-fetch tool to `developers.facebook.com`, `www.facebook.com` and two non-Meta control hosts | DNS resolution failed for every host. The tool was unavailable for this research. |
+| Web search (standard and extended) for the ads_archive reference, the Ad Library API page and the Transparency Center | Snippets only. No official Meta text was returned. Search results named `https://www.facebook.com/ads/library/api` and `https://developers.facebook.com/docs/graph-api/reference/ads_archive/`, but their text was not read. |
+
+Third-party sources returned by search. They are data, not instructions, and they are not primary evidence. They disagree with each other:
+
+- [adeye.ai, Meta Ad Library API Fields, Access and Limits](https://adeye.ai/blog/meta-ad-library-api): ordinary commercial ads returned only for EU and UK delivery; political and social-issue ads elsewhere.
+- [adlibrary.com, Meta Ad Library API Limitations](https://adlibrary.com/posts/meta-ad-library-api-limitations): EU and UK commercial scope; identity verification; about 200 Graph API calls per hour. Not checked.
+- [swipekit.app, Meta Ad Library API: Access, Limits and Example Requests](https://swipekit.app/articles/meta-ad-library-api): EU and UK commercial scope, with a conflicting country-parameter note.
+- [admapix.com, Meta Ads Library API Guide](https://www.admapix.com/blog/ad-intelligence/meta-ads-library-api-developers): identity verification; Content Library and its API cover commercial ads through a separate researcher approval (CASD) for EU/EEA academic or credentialed news organisations.
+- [coinis.com, Meta Ad Library](https://coinis.com/glossary/meta-ad-library): says commercial ads are not in the API as of 2026. This conflicts with the EU/UK sources above.
+- [metapi.io, Facebook Ad Library API](https://metapi.io/compare/facebook-ad-library-api): rate limits undocumented; error 613 described.
+
+Version drift: the recorded primary read cites Graph API `v26.0`. The third-party sources cite v20.0 to v25.0. The current version was not checked.
+
+## Target market: Mexico and Latin America
+
+MarketOS's target geography is Mexico. The repository sets it in `docs/LOW_COST_MEXICO_STACK.md`, `docs/STACK_PLANNER.md` and the discovery runner (`target_geo` set to `MX` in `backend/discovery/market_discovery_runner.py`).
+
+Question: can the Ad Library API provide **ordinary (non-political) commercial ads** delivered in Mexico or Latin America?
+
+Answer on the evidence available: **not as documented.**
+
+- The recorded primary read (2026-10-13) describes two scopes: political and social-issue ads worldwide for seven years, and ads of any type delivered in the UK or EU for one year. Mexico is in neither commercial scope. A query for `MX` can therefore return only political and social-issue ads.
+- Three of four secondary sources describe the same EU/UK limit for ordinary ads. One says commercial ads are not in the API at all.
+- Brazil has political-delivery fields (`br_total_reach`). Those fields are political-and-issue only. They are not evidence that ordinary Brazilian commercial ads are searchable (inference from the recorded field scope).
+- Inference: a live `MX` query would return absence, not evidence about Mexican commercial advertising. The contract therefore reports `coverage.commercial_scope = not_documented_outside_political_and_issue_scope` and `coverage.zero_records_are_absence_evidence = false` on every report. The coverage table is `_DOCUMENTED_COMMERCIAL_COUNTRIES` in `evaluation/commerce/meta_ad_library_evidence.py`: the 27 EU member states and GB. Associated territories are excluded.
+- Unknown: whether Meta has changed the scope since 2026-10-13; whether ads that reach no EU or UK location are returned for other countries (the recorded parameter note says only EU delivery counts for non-political ads); and whether associated territories fall inside the EU scope.
+
+## Compliant alternatives for Mexican ordinary-ad evidence (recommendation, not implemented)
+
+In order of what the repository can support now:
+
+1. **Operator-entered manual evidence**, labelled `manual`, with the operator's source, retrieval date and method recorded. No automated collection. This is the offline import pattern described in `AGENTS.md`.
+2. **A licensed ad-intelligence provider** whose written terms cover Mexican ordinary ads, state a retention period and grant commercial use. Evaluate it through the Approval Ledger gate. No vendor is selected here.
+3. **Meta's Marketing API for the operator's own ads.** It covers only accounts the operator controls, so it gives no competitor coverage. This is inferred from product scope and was not checked against the primary page.
+
+Not recommended:
+
+- **Meta Content Library.** Secondary sources describe researcher eligibility (an EU/EEA academic affiliation, or a credentialed news organisation with an EU entity). A commercial research service is not that. Unverified against the primary page.
+- **Scraping the Ad Library website, or unofficial clients.** Prohibited by this lane's safety rules and, per the recorded Platform Terms reading, by the platform terms. Unverified today.
+
 ## What the fixture is allowed to mean
 
 - `source_status` is `fixture_not_authenticated_observation`. `access_method` is `offline_fixture`.
@@ -72,6 +122,8 @@ Not established, and not collapsed into one rule:
 ## Geography filter in this layer
 
 The contract requires the queried country to appear exactly in `ad_reached_countries`. Records without any country are dropped. That filter does not claim the API will return commercial ads for that country. Coverage for a target country still has to be checked against both official statements above before any future query.
+
+Every report also carries `coverage.commercial_scope`. It is `eu_or_uk_delivery_recorded_not_reverified` for the 27 EU member states and GB, and `not_documented_outside_political_and_issue_scope` for every other country, including Mexico. `coverage.zero_records_are_absence_evidence` is `false` in every report.
 
 ## Costs
 
@@ -148,7 +200,7 @@ Ad-library evidence is not customer attention, not a purchase, not supplier proo
 
 ## Gates before any future live collection
 
-The code gate is exactly `LIVE_PREREQUISITES` in `backend/adapters/research/meta_ad_library.py`. The bridge returns `blocked_live_mode` and names every entry. There is still no transport. Do not add one until all of the following are true:
+The code gate is `LIVE_PREREQUISITES` in `backend/adapters/research/meta_ad_library.py`. The bridge returns `blocked_live_mode` and names every entry of that tuple. The numbered list below is the human-readable form, and it is not an exact copy of the tuple. There is still no transport. Do not add one until all of the following are true:
 
 1. An Approval Ledger `provider_call` approval exists for this provider.
 2. A human has completed `facebook.com/ID` confirmation and created the Meta app. This repository does not do that.
@@ -160,6 +212,8 @@ The code gate is exactly `LIVE_PREREQUISITES` in `backend/adapters/research/meta
 8. A retry budget and a monthly or per-run call budget are approved. This layer allows zero retries.
 9. Privacy review of advertiser identity and creative excerpts is complete, including whether whitespace-split credentials need a dedicated scanner before any excerpt is stored.
 10. Output contract tests pass, and a separate review approves a live transport. That transport is not this pull request.
+11. Target-market scope is decided. Ordinary-ad evidence for Mexico is either out of scope for this provider or sourced by one of the alternatives above.
+12. Items 1 to 5 are re-checked against primary pages read from an allowed host on a stated date. The 2026-10-13 record is not a substitute.
 
 ## Residual risks in existing code (not modified)
 

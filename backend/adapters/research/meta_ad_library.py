@@ -9,8 +9,9 @@ unmet. There is no live transport in this release.
 This module reads no environment variables, loads no credentials, and imports no HTTP
 client. The output is research context about a supplied archive shape. It is not supplier
 proof, not product demand, not customer attention, not a purchase, and not
-campaign or targeting authority. Primary Meta pages were read on 2026-10-13;
-that reading does not make a fixture an authenticated observation.
+campaign or targeting authority. The primary Meta pages recorded in
+``docs/META_AD_LIBRARY_EVIDENCE.md`` were read on 2026-10-13. That reading could not be repeated on 2026-10-14,
+and no reading makes a fixture an authenticated observation.
 Ad evidence is deliberately not attached to ``ResearchCandidate.additional_evidence`` or
 any scorer.
 """
@@ -39,6 +40,9 @@ LIVE_PREREQUISITES = (
     "primary-source verification remains incomplete for token type, numeric rate limit, result cap, and UK-only commercial return",
     "operator acceptance of Platform Terms and the data-storage terms linked from the Ad Library API page, not accepted here",
     "target-country coverage checked against both the API landing page and the ads_archive EU note before any query",
+    "primary Meta pages re-read from an allowed host on a stated date (the 2026-10-14 attempt was refused by host policy)",
+    "Mexico and Latin America: ordinary commercial ads are outside the documented scope (EU and UK delivery only); "
+    "zero records for such a country are not evidence that its commercial ads are absent",
     "spend, impression, reach, and targeting values stay unmapped; documented ranges are not performance outcomes",
     "credential reference configured (credential-meta-ad-library, secret value absent)",
     "rate-limit policy and retry budget defined for a real transport",

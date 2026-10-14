@@ -80,6 +80,20 @@ MAX_PAGE_NAME_CHARS = 100
 MAX_RAW_TEXT_CHARS = 2000
 MAX_SNAPSHOT_CHARS = 2048
 
+# Ordinary (non-political) ads are documented as searchable only when delivered in the EU or the UK. The EU list is
+# the 27 member states, which is public EU membership, not a Meta document. Associated territories are excluded
+# because their scope is not established. Source: the Ad Library API landing page as recorded on 2026-10-13. That
+# record could not be repeated on 2026-10-14, so this table is a recorded limit, not a re-verified one.
+_EU_MEMBER_STATES = frozenset(
+    {
+        "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU",
+        "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE",
+    }
+)
+_DOCUMENTED_COMMERCIAL_COUNTRIES = _EU_MEMBER_STATES | {"GB"}
+COMMERCIAL_SCOPE_DOCUMENTED = "eu_or_uk_delivery_recorded_not_reverified"
+COMMERCIAL_SCOPE_NOT_DOCUMENTED = "not_documented_outside_political_and_issue_scope"
+
 RESPONSE_STATUSES = (
     "ok",
     "partial",
@@ -281,6 +295,13 @@ class AdLibraryEvidenceReport:
         }
 
 
+def _commercial_scope(country: str) -> str:
+    """Whether ordinary ads for ``country`` fall in the documented scope. Only the queried code is judged."""
+    if country in _DOCUMENTED_COMMERCIAL_COUNTRIES:
+        return COMMERCIAL_SCOPE_DOCUMENTED
+    return COMMERCIAL_SCOPE_NOT_DOCUMENTED
+
+
 def make_report(
     response_status: str,
     *,
@@ -318,6 +339,10 @@ def make_report(
                 "official_search_page_ids_max": 10,
                 "official_numeric_rate_limit": "not_stated_on_ads_archive_reference",
                 "delivery_times_are": "advertiser_intent_not_live_delivery",
+                # Political and social-issue ads are documented worldwide. Ordinary ads are documented for EU or UK
+                # delivery only, so zero records for any other country says nothing about that country's ads.
+                "commercial_scope": _commercial_scope(country),
+                "zero_records_are_absence_evidence": False,
             }
         ),
         counts=_ReadOnlyMapping(
