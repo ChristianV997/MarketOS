@@ -356,6 +356,10 @@ def test_fetched_manual_listing_reaches_existing_report_without_reclassification
     assert actual["evidence_mode"] == "manual_import"
     assert actual["observed_at"] == OBSERVED
     assert actual["source_url"] == record["source_ref"]
+    candidate = report["candidates"][0]
+    assert "listing_is_not_demand_measurement" in candidate["warnings"]
+    assert "listing_is_not_supplier_proof" in candidate["warnings"]
+    assert "supplier_proof_not_observed" in candidate["score"]["reasons"]
 
 
 def test_candidate_binding_cannot_export_secret_shaped_id():

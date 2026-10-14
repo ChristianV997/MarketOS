@@ -40,6 +40,11 @@ transport. All examples and tests use synthetic fixture responses.
   them. Do not assemble arbitrary conflicting single-row projections directly:
   the shared builder's equal-quality duplicate tie remains order-dependent and
   is outside this adapter's scope.
+- The canonical marketplace report can calculate its existing marketplace and
+  demand-proxy scores from projected rows. Those scores remain the canonical
+  report's deterministic heuristic; a listing does not establish a demand
+  measurement. The projected candidate warnings retain
+  `listing_is_not_demand_measurement`, alongside the supplier-proof warning.
 - `MercadoLibreResearchAdapter.to_canonical` rejects listing-only input with
   `listing_evidence_is_not_sales_velocity`. The trend store requires numeric
   velocity and confidence; a cumulative sales count or caller-provided velocity
@@ -100,18 +105,19 @@ quota has been verified; the request limit is MarketOS policy.
 Accessed **2026-10-13**, via official documentation/search-index excerpts; some
 direct documentation opens were unavailable. No provider API request was made.
 
-- [Items and searches](https://developers.mercadolibre.com.mx/es_ar/envio/items-y-busquedas)
-  (updated 2026-09-10): search endpoint examples use bearer authorization; public
+- [Items and searches](https://developers.mercadolibre.com.mx/en_us/introduction-services/items-and-searches)
+  (updated 2025-04-04): search endpoint examples use bearer authorization; public
   availability quantities are referential ranges. Listing search ordering is not
   proof of sales velocity or demand. Item examples pair prices with currency IDs.
-- [Authentication and authorization](https://developers.mercadolibre.com.mx/es_ar/como-empezar/autenticacion-y-autorizacion):
+- [Authentication and authorization](https://developers.mercadolibre.com.mx/es_ar/como-empezar/autenticacion-y-autorizacion)
+  (updated 2026-01-19):
   application/user authorization is required for OAuth access. Exact search
   entitlement/allowlisting for a future app is unverified.
 - [Domains and categories](https://developers.mercadolibre.com.mx/en_us/categories-and-listings)
   (updated 2025-10-06): site identity and `default_currency_id` metadata. A site
   default is not the currency of an observation. The adapter supports a bounded
   subset: MLA, MLM, MLB, MLC, MCO, MLU, MPE; endpoint entitlement is not implied.
-- [Trends](https://developers.mercadolibre.com.mx/en_us/trends/trends)
+- [Trends](https://developers.mercadolibre.com.mx/en_us/manage-sales/trends)
   (updated 2026-07-29): dedicated `/trends` endpoints exist and return weekly
   keyword/URL entries. They are separate from listing search and are not fetched
   or inferred by this adapter.

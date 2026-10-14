@@ -188,7 +188,12 @@ def _item_to_signal(
         category = _text(category, code="invalid_category", limit=64)
         if not re.fullmatch(site_id + r"[0-9]+", category):
             raise MercadoLibreEvidenceError("invalid_category")
-    warnings = ["listing_is_not_supplier_proof", "sales_velocity_unavailable", "confidence_unavailable"]
+    warnings = [
+        "listing_is_not_supplier_proof",
+        "listing_is_not_demand_measurement",
+        "sales_velocity_unavailable",
+        "confidence_unavailable",
+    ]
     for field, value in (("price", price), ("currency", currency), ("observation_time", observed_at)):
         if value is None:
             warnings.append(f"{field}_unavailable")
