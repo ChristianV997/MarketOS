@@ -84,6 +84,22 @@ proxies, scraping, ad creation, spend, messaging, publishing, personal customer
 profiles, or targeting attributes. Fixture/fake evidence is not live validation
 or launch authorization. Client visibility remains `internal_only`.
 
+## Vertical composition (with retirement + route gate)
+
+This contract is path-disjoint from:
+
+- PR retirement of legacy live reads (`core/sensors/tiktok_client.py`,
+  `connectors/tiktok_connector.py`) — those modules must stay offline shims and
+  must not be re-enabled by this evidence layer.
+- PR TikTok API approval boundary (`api/routes/tiktok.py`) — campaign
+  launch/ROAS/check routes deny when dry-run is not active; this evidence module
+  is not mounted on those routes and never grants spend/publish authority.
+
+Recommended merge order after exact-head composition testing: retirement →
+route approval gate → this offline evidence contract. Composition regressions
+live in `tests/test_tiktok_vertical_composition.py` (skip when peer PRs are
+absent).
+
 ## Future activation (only if eligibility changes)
 
 1. Re-read TikTok Research Tools eligibility and terms; confirm commercial use
