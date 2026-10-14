@@ -871,7 +871,8 @@ def commerce_provider_cycle(payload: dict[str, Any] | None = Body(default=None))
 def _verify_integration_webhook(source: str, payload: dict[str, Any], signature: str | None) -> bool:
     secret = os.getenv(f"{source.upper()}_WEBHOOK_SECRET", "")
     if not secret:
-        return True
+        # Fail closed: an unset secret never admits a payload (the route answers 503 before this is reached).
+        return False
     if not signature:
         return False
     body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -887,6 +888,10 @@ def integration_webhook(source: str, payload: dict[str, Any] = Body(...), x_webh
         if _prom_webhook_events is not None:
             _prom_webhook_events.labels(source="unknown", outcome="unsupported").inc()
         return JSONResponse({"accepted": False, "reason": "unsupported_webhook_source"}, status_code=404)
+    if not os.getenv(f"{source.upper()}_WEBHOOK_SECRET", ""):
+        if _prom_webhook_events is not None:
+            _prom_webhook_events.labels(source=source, outcome="secret_unconfigured").inc()
+        return JSONResponse({"accepted": False, "reason": "webhook_secret_unconfigured"}, status_code=503)
     if not _verify_integration_webhook(source, payload, x_webhook_signature):
         if _prom_webhook_events is not None:
             _prom_webhook_events.labels(source=source, outcome="invalid_signature").inc()

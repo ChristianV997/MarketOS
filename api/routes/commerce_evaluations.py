@@ -1,16 +1,21 @@
-"""Read-only Commerce Intelligence evaluation views."""
+"""Read-only Commerce Intelligence evaluation views.
+
+Evaluation inputs are canonical event JSONL, so every route is operator-only (``api/routes/event_access.py``)
+and evaluates only the events that belong to the verified principal's bound workspace.
+"""
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
 
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends
 
-from backend.security.rate_limit import check_rate_limit, event_read_policy
-from evaluation.commerce import compare_evaluations, evaluate_input, load_evaluation_input
+from api.routes.event_access import MAX_EVENT_JSONL_BYTES, admit_event_read, event_read_gate
+from backend.identity.workspaces import WorkspaceAccess
+from evaluation.commerce import EvaluationInput, compare_evaluations, evaluate_input, load_evaluation_input
 
-router = APIRouter(prefix="/api/evaluations", tags=["commerce-evaluations"])
+router = APIRouter(prefix="/api/evaluations", tags=["commerce-evaluations"], dependencies=[Depends(admit_event_read), Depends(event_read_gate)])
 ROOT = Path(__file__).resolve().parents[2]
 ARTIFACTS = (ROOT / "artifacts").resolve()
 
@@ -23,16 +28,18 @@ def _safe_configured_path(name: str) -> Path | None:
     return path if ARTIFACTS in path.parents else None
 
 
-def _limited(request: Request | None) -> JSONResponse | None:
-    key = getattr(getattr(request, "client", None), "host", None) or "direct"
-    decision = check_rate_limit(event_read_policy(), key)
-    if decision.allowed:
-        return None
-    return JSONResponse(
-        {"status": "rate_limited", "retry_after_seconds": decision.retry_after_seconds, "read_only": True, "mutated": False},
-        status_code=429,
-        headers={"Retry-After": str(decision.retry_after_seconds)},
-    )
+def _bound_input(loaded: EvaluationInput, access: WorkspaceAccess) -> EvaluationInput:
+    """Keep only the bound workspace's events. Events without a workspace are excluded; no artifact crosses workspaces."""
+    events = tuple(event for event in loaded.events if event.workspace_id == access.workspace_id)
+    return replace(loaded, events=events, artifact={})
+
+
+def _refused(path: Path | None) -> bool:
+    """A directory is never read as an event source (it would bring a sibling validation artifact), and a file beyond
+    the shared read bound is refused before it is parsed, as the canonical routes do."""
+    if path is None or not path.exists():
+        return False
+    return path.is_dir() or path.stat().st_size > MAX_EVENT_JSONL_BYTES
 
 
 def _unconfigured(message: str) -> dict:
@@ -43,26 +50,26 @@ def _unconfigured(message: str) -> dict:
 
 
 @router.get("")
-def evaluation(request: Request = None):
-    if limited := _limited(request):
-        return limited
+def evaluation(access: WorkspaceAccess = Depends(event_read_gate)):
     path = _safe_configured_path("MARKETOS_EVENT_READ_JSONL_PATH")
     if path is None:
         return _unconfigured("MARKETOS_EVENT_READ_JSONL_PATH must point beneath artifacts/")
-    report = evaluate_input(load_evaluation_input(path, source="jsonl"))
+    if _refused(path):
+        return _unconfigured("MARKETOS_EVENT_READ_JSONL_PATH must name a file within the bounded evaluation read size")
+    report = evaluate_input(_bound_input(load_evaluation_input(path, source="jsonl"), access))
     return report.to_dict()
 
 
 @router.get("/compare")
-def evaluation_compare(request: Request = None):
-    if limited := _limited(request):
-        return limited
+def evaluation_compare(access: WorkspaceAccess = Depends(event_read_gate)):
     baseline_path = _safe_configured_path("MARKETOS_EVALUATION_BASELINE_JSONL_PATH")
     current_path = _safe_configured_path("MARKETOS_EVALUATION_CURRENT_JSONL_PATH")
     if baseline_path is None or current_path is None:
         return _unconfigured("configured baseline and current evaluation JSONL paths are required beneath artifacts/")
-    baseline = evaluate_input(load_evaluation_input(baseline_path, source="jsonl"))
-    current = evaluate_input(load_evaluation_input(current_path, source="jsonl"))
+    if _refused(baseline_path) or _refused(current_path):
+        return _unconfigured("configured evaluation JSONL paths must name files within the bounded evaluation read size")
+    baseline = evaluate_input(_bound_input(load_evaluation_input(baseline_path, source="jsonl"), access))
+    current = evaluate_input(_bound_input(load_evaluation_input(current_path, source="jsonl"), access))
     comparison = compare_evaluations(baseline, current)
     return {
         "baseline": baseline.to_dict(), "current": current.to_dict(),

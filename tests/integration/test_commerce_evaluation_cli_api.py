@@ -6,6 +6,11 @@ from pathlib import Path
 import pytest
 
 from evaluation.commerce import evaluate_input, load_evaluation_input
+from backend.identity.roles import INTERNAL_OPERATOR
+from backend.identity.workspaces import WorkspaceAccess
+
+# Synthetic operator bound to the fixture workspace (events carry workspace_id "eval-demo").
+EVAL_ACCESS = WorkspaceAccess("https://clerk.test", "user_operator", "eval-demo", "internal", "synthetic", INTERNAL_OPERATOR)
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "commerce_evaluation"
 
@@ -91,7 +96,7 @@ def test_api_evaluation_reads_configured_artifact(monkeypatch, tmp_path):
     target.write_text((FIXTURE / "events.jsonl").read_text(encoding="utf-8"), encoding="utf-8")
     monkeypatch.setattr(evaluation_routes, "ARTIFACTS", root)
     monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(target))
-    report = evaluation_routes.evaluation()
+    report = evaluation_routes.evaluation(access=EVAL_ACCESS)
     assert report["framework_version"] == "commerce-evaluation-v1"
     assert report["event_count"] == 8
 
@@ -100,7 +105,7 @@ def test_api_evaluation_fails_closed_without_config(monkeypatch):
     from api.routes.commerce_evaluations import evaluation
 
     monkeypatch.delenv("MARKETOS_EVENT_READ_JSONL_PATH", raising=False)
-    report = evaluation()
+    report = evaluation(access=EVAL_ACCESS)
     assert report["status"] == "blocked"
     assert report["read_only"] is True
 
@@ -109,7 +114,7 @@ def test_api_rejects_configured_path_outside_artifacts(monkeypatch, tmp_path):
     from api.routes.commerce_evaluations import evaluation
 
     monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(tmp_path / "events.jsonl"))
-    report = evaluation()
+    report = evaluation(access=EVAL_ACCESS)
     assert report["status"] == "blocked"
 
 
@@ -128,7 +133,7 @@ def test_api_compare_requires_server_config(monkeypatch):
 
     monkeypatch.delenv("MARKETOS_EVALUATION_BASELINE_JSONL_PATH", raising=False)
     monkeypatch.delenv("MARKETOS_EVALUATION_CURRENT_JSONL_PATH", raising=False)
-    assert evaluation_compare()["status"] == "blocked"
+    assert evaluation_compare(access=EVAL_ACCESS)["status"] == "blocked"
 
 
 @pytest.mark.parametrize("source_flag", ["--artifact", "--workspace"])

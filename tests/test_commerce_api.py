@@ -152,21 +152,47 @@ def test_provider_cycle_endpoint_requires_urls_and_live_confirmation():
     assert commerce_provider_cycle({"urls": ["https://example.com"], "dry_run": False})["reasons"] == ["live_execution_requires_confirm_live"]
 
 
+def _signed_integration(secret: str, payload: dict) -> str:
+    import hashlib
+    import hmac
+    import json
+
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+
+
 def test_integration_webhook_deduplicates_and_publishes_to_broker(monkeypatch):
     from backend.api import integration_webhook
     from backend.integrations.medusa import commerce_provider
+    monkeypatch.setenv("MEDUSA_WEBHOOK_SECRET", "synthetic-medusa-secret")
     commerce_provider.webhook_events.clear()
-    first = integration_webhook("medusa", {"id": "evt-api-1", "type": "order.created"})
-    second = integration_webhook("medusa", {"id": "evt-api-1", "type": "order.created"})
+    payload = {"id": "evt-api-1", "type": "order.created"}
+    signature = _signed_integration("synthetic-medusa-secret", payload)
+    first = integration_webhook("medusa", payload, x_webhook_signature=signature)
+    second = integration_webhook("medusa", payload, x_webhook_signature=signature)
     assert first["accepted"] is True
     assert first["broker_event_id"]
     assert second == {"accepted": False, "duplicate": True, "event_id": "evt-api-1"}
 
 
-def test_integration_webhook_rejects_unsupported_or_unidentified_events():
+def test_integration_webhook_rejects_unsupported_or_unidentified_events(monkeypatch):
     from backend.api import integration_webhook
+    monkeypatch.setenv("MEDUSA_WEBHOOK_SECRET", "synthetic-medusa-secret")
+    payload = {"type": "order.created"}
     assert integration_webhook("unknown", {"id": "evt"}).status_code == 404
-    assert integration_webhook("medusa", {"type": "order.created"}).status_code == 400
+    assert integration_webhook("medusa", payload, x_webhook_signature=_signed_integration("synthetic-medusa-secret", payload)).status_code == 400
+
+
+def test_integration_webhook_without_a_configured_secret_publishes_nothing(monkeypatch):
+    from backend.api import integration_webhook
+    from backend.integrations.medusa import commerce_provider
+    monkeypatch.delenv("MEDUSA_WEBHOOK_SECRET", raising=False)
+    commerce_provider.webhook_events.clear()
+    payload = {"id": "evt-api-unsigned", "type": "order.created"}
+    response = integration_webhook("medusa", payload)
+    assert response.status_code == 503
+    assert b"webhook_secret_unconfigured" in response.body
+    assert "evt-api-unsigned" not in str(commerce_provider.webhook_events)
 
 
 def test_commerce_publish_requires_explicit_live_confirmation():

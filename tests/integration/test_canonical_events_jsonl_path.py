@@ -9,8 +9,13 @@ import pytest
 from fastapi import HTTPException
 
 from api.routes import canonical_events
+from backend.identity.roles import INTERNAL_OPERATOR
+from backend.identity.workspaces import WorkspaceAccess
 from backend.events import query_service
 from backend.events.query_models import EventQuery
+
+# Synthetic verified operator bound to the fixture workspace; the gate result is passed in because these tests call handlers directly.
+OPERATOR_ACCESS = WorkspaceAccess("https://clerk.test", "user_operator", "demo", "internal", "synthetic", INTERNAL_OPERATOR)
 
 
 def _query() -> EventQuery:
@@ -186,7 +191,7 @@ def test_existing_get_returns_in_jail_jsonl_events(monkeypatch, tmp_path):
     monkeypatch.setattr(canonical_events, "ARTIFACTS", artifacts.resolve())
     monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(path))
 
-    report = canonical_events.events(limit=100, offset=0, source="jsonl", request=None)
+    report = canonical_events.events(limit=100, offset=0, source="jsonl", request=None, access=OPERATOR_ACCESS)
 
     assert report["read_only"] is True
     assert report["network_calls"] is False
