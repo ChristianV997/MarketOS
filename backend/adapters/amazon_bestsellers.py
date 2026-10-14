@@ -1,8 +1,9 @@
 """Amazon bestseller research signal adapter (fixture-first, scrape-disabled).
 
 Historical behavior scraped Amazon Best Sellers HTML and fell back to mock
-rows. That scrape path is removed. Default collection is fixture/manual only
-and is never labeled as observed Amazon evidence.
+rows. That scrape path is removed. Default ``fetch()`` returns an empty list so
+SignalEngine never receives fixture product scores. Offline fixture/manual
+rows remain available only via ``collect_amazon_bestseller_evidence()``.
 
 Official live category-bestseller browse is not enabled here: Amazon's
 documented programmatic catalog/rank access is gated (Selling Partner API
@@ -29,6 +30,23 @@ LIVE_FLAG = "MARKETOS_AMAZON_BESTSELLERS_LIVE"
 PROVIDER_ENV = "MARKETOS_AMAZON_BESTSELLERS_PROVIDER"
 DEFAULT_MARKETPLACE = "US"
 DEFAULT_MARKETPLACE_ID = "ATVPDKIKX0DER"  # documented Amazon US marketplace id
+
+# Injected authority / volume claims are never copied onto normalized rows.
+_STRIPPED_AUTHORITY_FIELDS: frozenset[str] = frozenset(
+    {
+        "sales_volume",
+        "unit_sales",
+        "estimated_units",
+        "estimated_unit_sales",
+        "units_sold",
+        "demand_proof",
+        "profit",
+        "revenue",
+        "gmv",
+        "launch_authority",
+        "observed",
+    }
+)
 
 _CACHE: list[dict[str, Any]] = []
 _CACHE_TS: float = 0.0
@@ -240,7 +258,9 @@ def normalize_rank_record(
     stamp = raw.get("observed_at") if isinstance(raw.get("observed_at"), str) else observed_at
     source = FIXTURE_SOURCE if evidence_mode in {"fixture", "manual_import"} else "amazon_bestsellers_offline_transport"
     score = _rank_score(rank)
-    return {
+    # Fixture/manual/offline rows are never live-validated. Injected True is ignored.
+    # Sales-volume / demand-authority keys from raw input are never copied through.
+    row = {
         "product": product,
         "category": category_text,
         "rank": rank,
@@ -261,6 +281,9 @@ def normalize_rank_record(
         "network_calls": False,
         "mutated": False,
     }
+    for forbidden in _STRIPPED_AUTHORITY_FIELDS:
+        row.pop(forbidden, None)
+    return row
 
 
 def collect_amazon_bestseller_evidence(
@@ -275,8 +298,9 @@ def collect_amazon_bestseller_evidence(
 ) -> dict[str, Any]:
     """Collect Amazon bestseller-style evidence with explicit status labels.
 
-    ``fetch()`` remains the SignalEngine-compatible list API. This function is
-    the structured research entrypoint and never performs live Amazon HTTP.
+    ``fetch()`` is the SignalEngine list API and returns ``[]`` so fixture
+    scores never enter rankings. This function is the structured offline
+    research entrypoint and never performs live Amazon HTTP.
     """
     bounded = max(0, min(int(limit), 100))
     readiness = explain_amazon_bestsellers_readiness(
@@ -286,10 +310,19 @@ def collect_amazon_bestseller_evidence(
     warnings: list[str] = [
         "bestseller_rank_is_relative_not_unit_sales",
         "fixture_or_manual_is_not_observed_amazon_evidence",
+        "signalengine_fetch_returns_empty_non_authoritative_list",
     ]
 
     if mode == "fixture":
         records = [_row for _row in _fixture_rows(observed_at=observed_at)[:bounded]]
+        # Hard-enforce non-live labels even if fixture builders drift.
+        for record in records:
+            record["live_validated"] = False
+            record["evidence_mode"] = "fixture"
+            record["rank_semantics"] = "relative_bestseller_rank_not_unit_sales"
+            record["source"] = FIXTURE_SOURCE
+            for forbidden in _STRIPPED_AUTHORITY_FIELDS:
+                record.pop(forbidden, None)
         return {
             "status": "fixture",
             "evidence_mode": "fixture",
@@ -471,34 +504,37 @@ def collect_amazon_bestseller_evidence(
 
 
 def fetch() -> list[dict[str, Any]]:
-    """Return fixture Amazon bestseller signals for SignalEngine compatibility.
+    """Return an empty list for SignalEngine (non-authoritative by default).
 
-    Never scrapes Amazon HTML and never upgrades fixtures to observed/live.
-    Cached for one hour.
+    Never scrapes Amazon HTML, never emits ``amazon_bestsellers_mock`` product
+    score rows on the SignalEngine path, and never upgrades fixtures to
+    observed/live. Offline fixture rows remain available only via
+    ``collect_amazon_bestseller_evidence(mode="fixture")``. The empty result
+    is cached for one hour.
     """
     global _CACHE, _CACHE_TS
-    if _CACHE and (time.time() - _CACHE_TS) < _CACHE_TTL:
+    if _CACHE_TS and (time.time() - _CACHE_TS) < _CACHE_TTL:
         return _CACHE
 
-    result = collect_amazon_bestseller_evidence(mode="fixture", allow_network=False)
-    records = [dict(row) for row in result.get("records") or []]
-    _CACHE = records
+    _CACHE = []
     _CACHE_TS = time.time()
     _log.debug(
-        "amazon_bestsellers fixture_only count=%s categories_configured=%s",
-        len(records),
+        "amazon_bestsellers fetch empty_non_authoritative categories_configured=%s",
         len([c for c in _CATEGORIES if c.strip()]),
     )
-    return records
+    return _CACHE
 
 
 def register(signal_engine: Any) -> None:
-    """Register this adapter with the provided SignalEngine instance."""
+    """Register this adapter with the provided SignalEngine instance.
+
+    ``fetch`` returns ``[]`` so fixture product scores cannot enter rankings.
+    """
     signal_engine.register_source("amazon_bestsellers", fetch)
     try:
         from backend.discovery.registry import discovery_registry
 
-        # Fixture SignalEngine registration stays auth-optional; live SP-API /
+        # Empty SignalEngine registration stays auth-optional; live SP-API /
         # Creators access is separately gated and blocked by default.
         discovery_registry.register(
             "amazon_bestsellers",
@@ -507,7 +543,10 @@ def register(signal_engine: Any) -> None:
         )
     except Exception:
         pass
-    _log.info("amazon_bestsellers adapter registered (fixture-first; scrape disabled)")
+    _log.info(
+        "amazon_bestsellers adapter registered "
+        "(fetch empty for SignalEngine; fixtures offline via collect only)"
+    )
 
 
 # Backward-compatible private names referenced by older tests.

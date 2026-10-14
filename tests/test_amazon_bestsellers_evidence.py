@@ -8,6 +8,7 @@ import pytest
 
 from backend.adapters import amazon_bestsellers as mod
 from backend.adapters.amazon_bestsellers import (
+    FIXTURE_SOURCE,
     LIVE_FLAG,
     collect_amazon_bestseller_evidence,
     explain_amazon_bestsellers_readiness,
@@ -25,16 +26,19 @@ def _clear_cache(monkeypatch):
     monkeypatch.delenv("MARKETOS_AMAZON_BESTSELLERS_PROVIDER", raising=False)
 
 
-def test_default_fetch_is_fixture_only_and_never_observed():
+def test_fetch_returns_empty_non_authoritative_list():
     rows = fetch()
-    assert rows
-    assert all(row["source"] == "amazon_bestsellers_mock" for row in rows)
-    assert all(row["evidence_mode"] == "fixture" for row in rows)
-    assert all(row["live_validated"] is False for row in rows)
-    assert all(row["network_calls"] is False for row in rows)
-    assert all(row["rank_semantics"] == "relative_bestseller_rank_not_unit_sales" for row in rows)
-    assert all(row.get("price") is None for row in rows)
-    assert all(row.get("currency") is None for row in rows)
+    assert rows == []
+    assert not any(row.get("source") == FIXTURE_SOURCE for row in rows)
+    assert not any(row.get("source") == "amazon_bestsellers_mock" for row in rows)
+
+
+def test_fetch_does_not_emit_fixture_product_score_rows():
+    rows = fetch()
+    assert isinstance(rows, list)
+    assert len(rows) == 0
+    # Explicit regression: no product/score payloads on the SignalEngine path.
+    assert not any("product" in row and "score" in row for row in rows)
 
 
 def test_fetch_does_not_call_requests_or_parse_html(monkeypatch):
@@ -51,22 +55,47 @@ def test_fetch_does_not_call_requests_or_parse_html(monkeypatch):
         monkeypatch.setattr(mod, "_parse_page", boom)
     monkeypatch.setitem(__import__("sys").modules, "requests", type("R", (), {"get": staticmethod(boom)})())
     rows = fetch()
-    assert rows
-    assert all(row["evidence_mode"] == "fixture" for row in rows)
+    assert rows == []
 
 
 def test_fetch_cache_round_trip():
     first = fetch()
     second = fetch()
+    assert first == []
     assert first is second
 
 
-def test_register_with_signal_engine():
+def test_collect_fixture_still_returns_labeled_non_live_rows():
+    result = collect_amazon_bestseller_evidence(mode="fixture", allow_network=False)
+    assert result["status"] == "fixture"
+    assert result["evidence_mode"] == "fixture"
+    assert result["live_validated"] is False
+    assert result["network_calls"] is False
+    assert result["records"]
+    assert all(row["source"] == FIXTURE_SOURCE for row in result["records"])
+    assert all(row["evidence_mode"] == "fixture" for row in result["records"])
+    assert all(row["live_validated"] is False for row in result["records"])
+    assert all(row["rank_semantics"] == "relative_bestseller_rank_not_unit_sales" for row in result["records"])
+    assert all(row.get("price") is None for row in result["records"])
+    assert all(row.get("currency") is None for row in result["records"])
+    assert "signalengine_fetch_returns_empty_non_authoritative_list" in result["warnings"]
+
+
+def test_register_with_signal_engine_does_not_surface_amazon_fixture_scores():
     from core.signals import SignalEngine
 
     engine = SignalEngine()
     register(engine)
     assert any(item["name"] == "amazon_bestsellers" for item in engine._sources)
+    aggregated = engine.get(force_refresh=True)
+    # Engine may fall back to generic mock when all sources are empty; those
+    # must not be amazon fixture product scores from this adapter.
+    assert not any(row.get("source") == FIXTURE_SOURCE for row in aggregated)
+    assert not any(row.get("source") == "amazon_bestsellers_mock" for row in aggregated)
+    assert not any(
+        row.get("source") == "amazon_bestsellers" and row.get("evidence_mode") == "fixture"
+        for row in aggregated
+    )
 
 
 def test_readiness_live_gate_blocked_by_default():
@@ -234,3 +263,47 @@ def test_normalize_rejects_boolean_rank_and_keeps_missing_price():
     assert row["rank"] == 4
     assert row["price"] is None
     assert row["currency"] is None
+
+
+def test_fixture_and_manual_cannot_claim_live_validated_or_sales_volume_authority():
+    injected = {
+        "product": "Injected Authority Row",
+        "rank": 2,
+        "category": "electronics",
+        "live_validated": True,
+        "sales_volume": 12000,
+        "unit_sales": 5000,
+        "estimated_units": 999,
+        "units_sold": 100,
+        "demand_proof": True,
+        "profit": 42.0,
+        "revenue": 1000.0,
+        "gmv": 2000.0,
+        "launch_authority": True,
+        "observed": True,
+    }
+    fixture_row = normalize_rank_record(injected, evidence_mode="fixture", observed_at="2026-10-14T00:00:00Z")
+    manual_row = normalize_rank_record(injected, evidence_mode="manual_import", observed_at="2026-10-14T00:00:00Z")
+    assert fixture_row is not None and manual_row is not None
+    for row in (fixture_row, manual_row):
+        assert row["live_validated"] is False
+        assert row["rank_semantics"] == "relative_bestseller_rank_not_unit_sales"
+        assert "sales_volume" not in row
+        assert "unit_sales" not in row
+        assert "estimated_units" not in row
+        assert "units_sold" not in row
+        assert "demand_proof" not in row
+        assert "profit" not in row
+        assert "revenue" not in row
+        assert "gmv" not in row
+        assert "launch_authority" not in row
+        assert "observed" not in row
+
+    collect = collect_amazon_bestseller_evidence(
+        mode="manual_import",
+        manual_rows=[injected],
+    )
+    assert collect["records"]
+    assert all(row["live_validated"] is False for row in collect["records"])
+    assert all("sales_volume" not in row for row in collect["records"])
+    assert all("unit_sales" not in row for row in collect["records"])
