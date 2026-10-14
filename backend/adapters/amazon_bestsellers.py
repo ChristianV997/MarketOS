@@ -1,15 +1,23 @@
-"""Amazon bestseller research signal adapter (fixture-first, scrape-disabled).
+"""Amazon category-bestseller research adapter (unavailable live discovery).
 
 Historical behavior scraped Amazon Best Sellers HTML and fell back to mock
-rows. That scrape path is removed. Default ``fetch()`` returns an empty list so
-SignalEngine never receives fixture product scores. Offline fixture/manual
-rows remain available only via ``collect_amazon_bestseller_evidence()``.
+rows. That scrape path is removed.
 
-Official live category-bestseller browse is not enabled here: Amazon's
-documented programmatic catalog/rank access is gated (Selling Partner API
-Catalog Items for sellers/vendors; Creators API for Associates). This module
-exposes an injected transport seam and an explicit live gate that remains
-blocked unless a caller supplies a fake/offline transport for contract tests.
+Capability decision (official docs, access date 2026-10-14): Amazon does not
+document a commercially eligible category Best Sellers *list/feed* API for
+MarketOS multi-client product research. SP-API Catalog Items expose per-item
+``salesRanks`` after ASIN/search hits (seller/vendor Product Listing role).
+Creators API ``SearchItems`` / ``GetBrowseNodes`` expose catalog search and
+browse-node hierarchy (Associates + qualifying sales); ``SortBy`` has no
+BestSellers value. Neither is a Best Sellers page equivalent.
+
+Therefore:
+- Operational ``fetch()`` returns ``[]`` (never fixtures, never scrape).
+- Default ``collect_amazon_bestseller_evidence()`` returns
+  ``status=unavailable`` with an explicit blocker list.
+- Fixtures / manual import / offline fake-transport normalization remain only
+  behind explicit ``mode=`` selection for tests or demos — never as silent
+  operational research and never labeled live-validated.
 
 Registers itself with the SignalEngine as ``amazon_bestsellers``.
 """
@@ -25,8 +33,9 @@ from typing import Any, Callable, Mapping
 _log = logging.getLogger(__name__)
 
 SOURCE = "amazon_bestsellers"
-FIXTURE_SOURCE = "amazon_bestsellers_mock"  # retained: research consumers filter this as synthetic
+FIXTURE_SOURCE = "amazon_bestsellers_mock"  # research consumers filter this as synthetic
 LIVE_FLAG = "MARKETOS_AMAZON_BESTSELLERS_LIVE"
+DEMO_FLAG = "MARKETOS_AMAZON_BESTSELLERS_DEMO"
 PROVIDER_ENV = "MARKETOS_AMAZON_BESTSELLERS_PROVIDER"
 DEFAULT_MARKETPLACE = "US"
 DEFAULT_MARKETPLACE_ID = "ATVPDKIKX0DER"  # documented Amazon US marketplace id
@@ -48,11 +57,40 @@ _STRIPPED_AUTHORITY_FIELDS: frozenset[str] = frozenset(
     }
 )
 
+CAPABILITY_DECISION = {
+    "category_bestseller_discovery": "unavailable",
+    "reason_code": "no_documented_category_bestseller_list_api",
+    "access_date_utc": "2026-10-14",
+    "operator_context": "multi_client_commercial_product_research_not_seller_of_record",
+}
+
+LIVE_PREREQUISITES: tuple[str, ...] = (
+    "companyos_approval_ledger_provider_call_or_web_data_acquisition",
+    "credential_registry_entry_without_secret_values",
+    "resource_execution_governor_budget_and_rate_cap",
+    "trustos_provider_and_privacy_gate",
+    "documented_category_bestseller_list_api_or_explicit_rescope",
+)
+
+OFFICIAL_REFERENCES: tuple[str, ...] = (
+    "https://developer-docs.amazon.com/sp-api/docs/catalog-items-api-v2022-04-01-reference",
+    "https://developer-docs.amazon.com/sp-api/docs/role-mappings",
+    "https://affiliate-program.amazon.com/creatorsapi/docs/en-us/introduction",
+    "https://affiliate-program.amazon.com/creatorsapi/docs/en-us/api-reference/operations/search-items",
+    "https://affiliate-program.amazon.com/creatorsapi/docs/en-us/api-reference/operations/get-browse-nodes",
+)
+
 _CACHE: list[dict[str, Any]] = []
 _CACHE_TS: float = 0.0
 _CACHE_TTL = 3600  # 1 hour
+_LAST_FETCH_STATUS: dict[str, Any] = {
+    "status": "unavailable",
+    "reason_code": CAPABILITY_DECISION["reason_code"],
+    "live_validated": False,
+    "records_returned": 0,
+}
 
-# Categories remain configuration metadata for fixture rows only (no HTTP).
+# Categories remain configuration metadata for explicit fixture rows only (no HTTP).
 _CATEGORIES = os.getenv(
     "AMAZON_BESTSELLER_CATEGORIES",
     "beauty,electronics,home-kitchen,sports-outdoors,toys-games,pet-supplies,baby-products",
@@ -92,7 +130,6 @@ def _rank_score(rank: Any) -> float | None:
     if value < 0:
         return None
     if value == 0:
-        # Explicit zero is preserved as a numeric score of 0.0 (not missing).
         return 0.0
     return round(max(0.1, 1.0 - (value - 1) * 0.08), 2)
 
@@ -128,67 +165,101 @@ def _fixture_rows(*, observed_at: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _capability_blockers() -> list[str]:
+    return [
+        "html_bestseller_scrape_disabled",
+        "no_documented_category_bestseller_list_api",
+        "creators_api_searchitems_sortby_has_no_bestsellers_value",
+        "creators_api_getbrowsenodes_is_hierarchy_not_ranked_asin_list",
+        "sp_api_catalog_salesranks_are_per_item_not_category_feed",
+        "sp_api_catalog_items_requires_seller_or_vendor_product_listing_role",
+        "creators_api_requires_amazon_associates_enrollment_and_qualifying_sales",
+        "bestseller_rank_is_relative_not_unit_sales_or_demand_proof",
+        "allow_network_alone_is_not_approval_authority",
+        *LIVE_PREREQUISITES,
+    ]
+
+
 def explain_amazon_bestsellers_readiness(
     environ: Mapping[str, str] | None = None,
     *,
     allow_network: bool = False,
     transport: Any | None = None,
 ) -> dict[str, Any]:
-    """Explain why live Amazon bestseller research is blocked by default."""
+    """Explain why live Amazon category-bestseller research is unavailable."""
     env = os.environ if environ is None else environ
     live_flag = str(env.get(LIVE_FLAG, "0")).strip() == "1"
+    demo_flag = str(env.get(DEMO_FLAG, "0")).strip() == "1"
     provider = str(env.get(PROVIDER_ENV, "")).strip().lower()
     transport_ready = transport is not None and callable(getattr(transport, "fetch_catalog_ranks", None))
     offline = getattr(transport, "offline_fixture", False) is True if transport is not None else False
-    blockers = [
-        "html_bestseller_scrape_disabled",
-        "no_public_ungated_bestseller_browse_api_documented",
-        "sp_api_catalog_items_requires_seller_or_vendor_product_listing_role",
-        "creators_api_requires_amazon_associates_enrollment_and_qualifying_sales",
-        "bestseller_rank_is_relative_not_unit_sales_or_demand_proof",
-    ]
+    blockers = _capability_blockers()
     if not live_flag:
         blockers.append(f"{LIVE_FLAG}_disabled")
     if not allow_network:
         blockers.append("allow_network_false")
     if not transport_ready:
-        blockers.append("injected_transport_required")
+        blockers.append("injected_transport_required_for_offline_contract_tests_only")
     elif not offline and live_flag and allow_network:
-        blockers.append("live_provider_calls_not_enabled_in_this_lane")
-    status = "fixture_only"
+        blockers.append("live_provider_http_not_enabled_no_category_bestseller_endpoint")
+
+    # Primary operational status: unavailable. Offline transport readiness is
+    # only for explicit contract-test normalization, not live discovery.
+    status = "unavailable_no_category_bestseller_api"
     if live_flag and allow_network and transport_ready and offline:
-        status = "offline_transport_ready"
+        status = "offline_transport_contract_ready"
     elif live_flag and allow_network and transport_ready:
-        status = "blocked_gated_official_access"
+        status = "blocked_no_documented_live_bestseller_endpoint"
+
     return {
         "provider": provider or "unset",
         "live_flag_enabled": live_flag,
+        "demo_flag_enabled": demo_flag,
         "allow_network": bool(allow_network),
         "transport_injected": transport_ready,
         "transport_offline_fixture": offline,
         "status": status,
+        "capability_decision": dict(CAPABILITY_DECISION),
+        "live_prerequisites": list(LIVE_PREREQUISITES),
         "read_only": True,
         "mutated": False,
         "html_scraping": False,
         "credentials_inspected": False,
+        "secrets_printed": False,
+        "approval_ledger_authority": False,
         "supported": {
-            "fixture_bestseller_rows": True,
+            "explicit_fixture_demo_rows": True,
             "manual_import_normalization": True,
             "injected_offline_transport_normalization": True,
+            "operational_empty_fetch": True,
         },
         "unsupported": {
             "amazon_html_best_sellers_scrape": True,
-            "ungated_live_bestseller_browse": True,
+            "ungated_live_category_bestseller_browse": True,
+            "silent_fixture_as_operational_research": True,
             "mock_rows_as_observed_evidence": True,
             "rank_as_unit_sales_or_profit": True,
+            "labeling_catalog_search_or_per_asin_salesranks_as_bestseller_feed": True,
         },
-        "official_references": [
-            "https://developer-docs.amazon.com/sp-api/docs/catalog-items-api",
-            "https://developer-docs.amazon.com/sp-api/docs/catalog-items-api-v2022-04-01-reference",
-            "https://affiliate-program.amazon.com/creatorsapi/docs/en-us/introduction",
-        ],
+        "adjacent_not_bestseller_feed": {
+            "sp_api_catalog_items_salesranks_per_asin": (
+                "Per-item ranks when ASINs are already known; requires SP-API "
+                "developer registration + selling-partner Product Listing role."
+            ),
+            "creators_api_searchitems": (
+                "Keyword/browseNode catalog search; SortBy has no BestSellers; "
+                "requires Associates + qualifying sales."
+            ),
+            "creators_api_getbrowsenodes": "Browse-node hierarchy only, not ranked ASIN lists.",
+        },
+        "official_references": list(OFFICIAL_REFERENCES),
         "blockers": blockers,
     }
+
+
+def last_fetch_status() -> dict[str, Any]:
+    """Return the last SignalEngine ``fetch()`` status envelope (never live)."""
+    return dict(_LAST_FETCH_STATUS)
 
 
 def normalize_rank_record(
@@ -242,7 +313,6 @@ def normalize_rank_record(
     currency = raw.get("currency")
     currency_text = str(currency).strip().upper() if isinstance(currency, str) and currency.strip() else None
     if price is not None and currency_text is None:
-        # Do not invent a currency for a present price.
         price = None
 
     marketplace = raw.get("marketplace") or default_marketplace
@@ -258,8 +328,6 @@ def normalize_rank_record(
     stamp = raw.get("observed_at") if isinstance(raw.get("observed_at"), str) else observed_at
     source = FIXTURE_SOURCE if evidence_mode in {"fixture", "manual_import"} else "amazon_bestsellers_offline_transport"
     score = _rank_score(rank)
-    # Fixture/manual/offline rows are never live-validated. Injected True is ignored.
-    # Sales-volume / demand-authority keys from raw input are never copied through.
     row = {
         "product": product,
         "category": category_text,
@@ -288,7 +356,7 @@ def normalize_rank_record(
 
 def collect_amazon_bestseller_evidence(
     *,
-    mode: str = "fixture",
+    mode: str = "unavailable",
     allow_network: bool = False,
     transport: Any | None = None,
     manual_rows: list[Mapping[str, Any]] | None = None,
@@ -298,9 +366,10 @@ def collect_amazon_bestseller_evidence(
 ) -> dict[str, Any]:
     """Collect Amazon bestseller-style evidence with explicit status labels.
 
-    ``fetch()`` is the SignalEngine list API and returns ``[]`` so fixture
-    scores never enter rankings. This function is the structured offline
-    research entrypoint and never performs live Amazon HTTP.
+    Default ``mode="unavailable"`` is the operational research path: empty
+    records and a precise unavailable/blocked envelope. Fixtures require
+    ``mode="fixture"`` (or demo env + explicit fixture mode). Never performs
+    live Amazon HTTP. ``allow_network`` alone is never approval authority.
     """
     bounded = max(0, min(int(limit), 100))
     readiness = explain_amazon_bestsellers_readiness(
@@ -311,15 +380,41 @@ def collect_amazon_bestseller_evidence(
         "bestseller_rank_is_relative_not_unit_sales",
         "fixture_or_manual_is_not_observed_amazon_evidence",
         "signalengine_fetch_returns_empty_non_authoritative_list",
+        "category_bestseller_discovery_unavailable_no_documented_api",
     ]
 
+    if mode in {"unavailable", "operational", "default"}:
+        return {
+            "status": "unavailable",
+            "evidence_mode": "unavailable",
+            "records": [],
+            "record_count": 0,
+            "readiness": readiness,
+            "warnings": warnings,
+            "blockers": list(readiness.get("blockers") or []),
+            "capability_decision": dict(CAPABILITY_DECISION),
+            "html_scraping": False,
+            "network_calls": False,
+            "mutated": False,
+            "live_validated": False,
+            "read_only": True,
+            "observed_at": observed_at,
+            "error": {
+                "code": CAPABILITY_DECISION["reason_code"],
+                "message": (
+                    "Amazon does not document a category Best Sellers list API "
+                    "for this operator context. Per-item salesRanks and catalog "
+                    "search are distinct and are not labeled as bestseller feeds."
+                ),
+            },
+        }
+
     if mode == "fixture":
-        records = [_row for _row in _fixture_rows(observed_at=observed_at)[:bounded]]
-        # Hard-enforce non-live labels even if fixture builders drift.
+        records = [dict(row) for row in _fixture_rows(observed_at=observed_at)[:bounded]]
         for record in records:
             record["live_validated"] = False
+            record["network_calls"] = False
             record["evidence_mode"] = "fixture"
-            record["rank_semantics"] = "relative_bestseller_rank_not_unit_sales"
             record["source"] = FIXTURE_SOURCE
             for forbidden in _STRIPPED_AUTHORITY_FIELDS:
                 record.pop(forbidden, None)
@@ -329,8 +424,9 @@ def collect_amazon_bestseller_evidence(
             "records": records,
             "record_count": len(records),
             "readiness": readiness,
-            "warnings": warnings,
+            "warnings": warnings + ["explicit_fixture_mode_not_operational_research"],
             "blockers": [],
+            "capability_decision": dict(CAPABILITY_DECISION),
             "html_scraping": False,
             "network_calls": False,
             "mutated": False,
@@ -349,6 +445,7 @@ def collect_amazon_bestseller_evidence(
                 "readiness": readiness,
                 "warnings": warnings + ["manual_rows_required"],
                 "blockers": ["manual_rows_missing"],
+                "capability_decision": dict(CAPABILITY_DECISION),
                 "html_scraping": False,
                 "network_calls": False,
                 "mutated": False,
@@ -378,8 +475,9 @@ def collect_amazon_bestseller_evidence(
             "records": records,
             "record_count": len(records),
             "readiness": readiness,
-            "warnings": sorted(set(warnings)),
+            "warnings": sorted(set(warnings + ["explicit_manual_import_not_live_amazon"])),
             "blockers": [],
+            "capability_decision": dict(CAPABILITY_DECISION),
             "html_scraping": False,
             "network_calls": False,
             "mutated": False,
@@ -389,15 +487,18 @@ def collect_amazon_bestseller_evidence(
         }
 
     if mode == "live":
-        if readiness["status"] != "offline_transport_ready":
+        # Category-bestseller live discovery remains unavailable even when flags
+        # are set. Offline transport only exercises normalization contracts.
+        if readiness["status"] != "offline_transport_contract_ready":
             return {
                 "status": "blocked",
                 "evidence_mode": "blocked",
                 "records": [],
                 "record_count": 0,
                 "readiness": readiness,
-                "warnings": warnings + ["live_amazon_bestseller_browse_unavailable"],
+                "warnings": warnings + ["live_category_bestseller_browse_unavailable"],
                 "blockers": list(readiness.get("blockers") or []),
+                "capability_decision": dict(CAPABILITY_DECISION),
                 "html_scraping": False,
                 "network_calls": False,
                 "mutated": False,
@@ -416,6 +517,7 @@ def collect_amazon_bestseller_evidence(
                 "readiness": readiness,
                 "warnings": warnings + [f"transport_failed:{type(exc).__name__}"],
                 "blockers": [],
+                "capability_decision": dict(CAPABILITY_DECISION),
                 "html_scraping": False,
                 "network_calls": False,
                 "mutated": False,
@@ -432,6 +534,7 @@ def collect_amazon_bestseller_evidence(
                 "readiness": readiness,
                 "warnings": warnings + ["transport_payload_not_object"],
                 "blockers": [],
+                "capability_decision": dict(CAPABILITY_DECISION),
                 "html_scraping": False,
                 "network_calls": False,
                 "mutated": False,
@@ -451,6 +554,7 @@ def collect_amazon_bestseller_evidence(
                 "readiness": readiness,
                 "warnings": warnings + ["transport_items_missing"],
                 "blockers": [],
+                "capability_decision": dict(CAPABILITY_DECISION),
                 "html_scraping": False,
                 "network_calls": False,
                 "mutated": False,
@@ -476,8 +580,17 @@ def collect_amazon_bestseller_evidence(
             "records": records,
             "record_count": len(records),
             "readiness": readiness,
-            "warnings": sorted(set(warnings)),
+            "warnings": sorted(
+                set(
+                    warnings
+                    + [
+                        "offline_transport_is_contract_test_not_live_bestseller_discovery",
+                        "do_not_label_as_category_bestseller_feed",
+                    ]
+                )
+            ),
             "blockers": [],
+            "capability_decision": dict(CAPABILITY_DECISION),
             "html_scraping": False,
             "network_calls": False,
             "mutated": False,
@@ -492,8 +605,9 @@ def collect_amazon_bestseller_evidence(
         "records": [],
         "record_count": 0,
         "readiness": readiness,
-        "warnings": warnings + ["mode_must_be_fixture_manual_import_or_live"],
+        "warnings": warnings + ["mode_must_be_unavailable_fixture_manual_import_or_live"],
         "blockers": ["invalid_mode"],
+        "capability_decision": dict(CAPABILITY_DECISION),
         "html_scraping": False,
         "network_calls": False,
         "mutated": False,
@@ -504,22 +618,30 @@ def collect_amazon_bestseller_evidence(
 
 
 def fetch() -> list[dict[str, Any]]:
-    """Return an empty list for SignalEngine (non-authoritative by default).
+    """SignalEngine path: empty list; category-bestseller discovery unavailable.
 
-    Never scrapes Amazon HTML, never emits ``amazon_bestsellers_mock`` product
-    score rows on the SignalEngine path, and never upgrades fixtures to
-    observed/live. Offline fixture rows remain available only via
-    ``collect_amazon_bestseller_evidence(mode="fixture")``. The empty result
-    is cached for one hour.
+    Never scrapes Amazon HTML, never emits fixture product scores, and never
+    upgrades fixtures to observed/live — including when ``DEMO_FLAG`` is set.
+    Explicit demos must call ``collect_amazon_bestseller_evidence(mode="fixture")``.
     """
-    global _CACHE, _CACHE_TS
+    global _CACHE, _CACHE_TS, _LAST_FETCH_STATUS
     if _CACHE_TS and (time.time() - _CACHE_TS) < _CACHE_TTL:
         return _CACHE
 
     _CACHE = []
     _CACHE_TS = time.time()
-    _log.debug(
-        "amazon_bestsellers fetch empty_non_authoritative categories_configured=%s",
+    _LAST_FETCH_STATUS = {
+        "status": "unavailable",
+        "reason_code": CAPABILITY_DECISION["reason_code"],
+        "live_validated": False,
+        "network_calls": False,
+        "html_scraping": False,
+        "records_returned": 0,
+        "capability_decision": dict(CAPABILITY_DECISION),
+    }
+    _log.info(
+        "amazon_bestsellers fetch unavailable_no_category_bestseller_api "
+        "records=0 categories_configured=%s",
         len([c for c in _CATEGORIES if c.strip()]),
     )
     return _CACHE
@@ -528,14 +650,12 @@ def fetch() -> list[dict[str, Any]]:
 def register(signal_engine: Any) -> None:
     """Register this adapter with the provided SignalEngine instance.
 
-    ``fetch`` returns ``[]`` so fixture product scores cannot enter rankings.
+    ``fetch`` returns ``[]`` so unavailable Amazon discovery cannot enter rankings.
     """
     signal_engine.register_source("amazon_bestsellers", fetch)
     try:
         from backend.discovery.registry import discovery_registry
 
-        # Empty SignalEngine registration stays auth-optional; live SP-API /
-        # Creators access is separately gated and blocked by default.
         discovery_registry.register(
             "amazon_bestsellers",
             credential_env_vars=[],
@@ -545,7 +665,7 @@ def register(signal_engine: Any) -> None:
         pass
     _log.info(
         "amazon_bestsellers adapter registered "
-        "(fetch empty for SignalEngine; fixtures offline via collect only)"
+        "(operational unavailable; fixtures only via explicit collect mode)"
     )
 
 
@@ -562,12 +682,17 @@ _MOCK_PRODUCTS = [
 
 
 __all__ = [
+    "CAPABILITY_DECISION",
+    "DEMO_FLAG",
     "FIXTURE_SOURCE",
     "LIVE_FLAG",
+    "LIVE_PREREQUISITES",
+    "OFFICIAL_REFERENCES",
     "SOURCE",
     "collect_amazon_bestseller_evidence",
     "explain_amazon_bestsellers_readiness",
     "fetch",
+    "last_fetch_status",
     "normalize_rank_record",
     "register",
 ]

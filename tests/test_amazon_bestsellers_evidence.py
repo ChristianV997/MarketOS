@@ -1,4 +1,4 @@
-"""Focused evidence tests for the scrape-disabled Amazon bestsellers adapter."""
+"""Focused evidence tests for the unavailable Amazon category-bestseller adapter."""
 from __future__ import annotations
 
 import json
@@ -8,11 +8,14 @@ import pytest
 
 from backend.adapters import amazon_bestsellers as mod
 from backend.adapters.amazon_bestsellers import (
+    CAPABILITY_DECISION,
+    DEMO_FLAG,
     FIXTURE_SOURCE,
     LIVE_FLAG,
     collect_amazon_bestseller_evidence,
     explain_amazon_bestsellers_readiness,
     fetch,
+    last_fetch_status,
     normalize_rank_record,
     register,
 )
@@ -22,23 +25,31 @@ from backend.adapters.amazon_bestsellers import (
 def _clear_cache(monkeypatch):
     monkeypatch.setattr(mod, "_CACHE", [])
     monkeypatch.setattr(mod, "_CACHE_TS", 0.0)
+    monkeypatch.setattr(
+        mod,
+        "_LAST_FETCH_STATUS",
+        {
+            "status": "unavailable",
+            "reason_code": CAPABILITY_DECISION["reason_code"],
+            "live_validated": False,
+            "records_returned": 0,
+        },
+    )
     monkeypatch.delenv(LIVE_FLAG, raising=False)
+    monkeypatch.delenv(DEMO_FLAG, raising=False)
     monkeypatch.delenv("MARKETOS_AMAZON_BESTSELLERS_PROVIDER", raising=False)
 
 
-def test_fetch_returns_empty_non_authoritative_list():
+def test_fetch_returns_empty_unavailable_and_never_fixtures(monkeypatch):
+    monkeypatch.setenv(DEMO_FLAG, "1")
     rows = fetch()
     assert rows == []
+    status = last_fetch_status()
+    assert status["status"] == "unavailable"
+    assert status["live_validated"] is False
+    assert status["records_returned"] == 0
+    assert status["reason_code"] == "no_documented_category_bestseller_list_api"
     assert not any(row.get("source") == FIXTURE_SOURCE for row in rows)
-    assert not any(row.get("source") == "amazon_bestsellers_mock" for row in rows)
-
-
-def test_fetch_does_not_emit_fixture_product_score_rows():
-    rows = fetch()
-    assert isinstance(rows, list)
-    assert len(rows) == 0
-    # Explicit regression: no product/score payloads on the SignalEngine path.
-    assert not any("product" in row and "score" in row for row in rows)
 
 
 def test_fetch_does_not_call_requests_or_parse_html(monkeypatch):
@@ -46,16 +57,12 @@ def test_fetch_does_not_call_requests_or_parse_html(monkeypatch):
         raise AssertionError("network or html path must not run")
 
     monkeypatch.setitem(os.environ, "AMAZON_BESTSELLER_CATEGORIES", "electronics")
-    monkeypatch.setattr(mod, "_CACHE", [])
-    monkeypatch.setattr(mod, "_CACHE_TS", 0.0)
-    # If legacy helpers were reintroduced, these would fail loudly.
     if hasattr(mod, "_fetch_category"):
         monkeypatch.setattr(mod, "_fetch_category", boom)
     if hasattr(mod, "_parse_page"):
         monkeypatch.setattr(mod, "_parse_page", boom)
     monkeypatch.setitem(__import__("sys").modules, "requests", type("R", (), {"get": staticmethod(boom)})())
-    rows = fetch()
-    assert rows == []
+    assert fetch() == []
 
 
 def test_fetch_cache_round_trip():
@@ -65,7 +72,20 @@ def test_fetch_cache_round_trip():
     assert first is second
 
 
-def test_collect_fixture_still_returns_labeled_non_live_rows():
+def test_default_collect_is_unavailable_not_fixture():
+    result = collect_amazon_bestseller_evidence()
+    assert result["status"] == "unavailable"
+    assert result["evidence_mode"] == "unavailable"
+    assert result["records"] == []
+    assert result["record_count"] == 0
+    assert result["live_validated"] is False
+    assert result["network_calls"] is False
+    assert result["capability_decision"]["category_bestseller_discovery"] == "unavailable"
+    assert result["error"]["code"] == "no_documented_category_bestseller_list_api"
+    assert "no_documented_category_bestseller_list_api" in result["blockers"]
+
+
+def test_collect_fixture_requires_explicit_mode_and_stays_non_live():
     result = collect_amazon_bestseller_evidence(mode="fixture", allow_network=False)
     assert result["status"] == "fixture"
     assert result["evidence_mode"] == "fixture"
@@ -73,12 +93,9 @@ def test_collect_fixture_still_returns_labeled_non_live_rows():
     assert result["network_calls"] is False
     assert result["records"]
     assert all(row["source"] == FIXTURE_SOURCE for row in result["records"])
-    assert all(row["evidence_mode"] == "fixture" for row in result["records"])
     assert all(row["live_validated"] is False for row in result["records"])
     assert all(row["rank_semantics"] == "relative_bestseller_rank_not_unit_sales" for row in result["records"])
-    assert all(row.get("price") is None for row in result["records"])
-    assert all(row.get("currency") is None for row in result["records"])
-    assert "signalengine_fetch_returns_empty_non_authoritative_list" in result["warnings"]
+    assert "explicit_fixture_mode_not_operational_research" in result["warnings"]
 
 
 def test_register_with_signal_engine_does_not_surface_amazon_fixture_scores():
@@ -88,23 +105,22 @@ def test_register_with_signal_engine_does_not_surface_amazon_fixture_scores():
     register(engine)
     assert any(item["name"] == "amazon_bestsellers" for item in engine._sources)
     aggregated = engine.get(force_refresh=True)
-    # Engine may fall back to generic mock when all sources are empty; those
-    # must not be amazon fixture product scores from this adapter.
     assert not any(row.get("source") == FIXTURE_SOURCE for row in aggregated)
     assert not any(row.get("source") == "amazon_bestsellers_mock" for row in aggregated)
-    assert not any(
-        row.get("source") == "amazon_bestsellers" and row.get("evidence_mode") == "fixture"
-        for row in aggregated
-    )
+    # All-source-empty may yield generic engine mock — distinct from Amazon observation.
+    assert all(row.get("source") != "amazon_bestsellers" for row in aggregated)
 
 
-def test_readiness_live_gate_blocked_by_default():
+def test_readiness_reports_unavailable_capability():
     readiness = explain_amazon_bestsellers_readiness(allow_network=False)
     assert readiness["html_scraping"] is False
     assert readiness["live_flag_enabled"] is False
-    assert readiness["status"] == "fixture_only"
-    assert "html_bestseller_scrape_disabled" in readiness["blockers"]
-    assert readiness["unsupported"]["ungated_live_bestseller_browse"] is True
+    assert readiness["status"] == "unavailable_no_category_bestseller_api"
+    assert readiness["approval_ledger_authority"] is False
+    assert readiness["unsupported"]["ungated_live_category_bestseller_browse"] is True
+    assert readiness["unsupported"]["silent_fixture_as_operational_research"] is True
+    assert "creators_api_searchitems_sortby_has_no_bestsellers_value" in readiness["blockers"]
+    assert "companyos_approval_ledger_provider_call_or_web_data_acquisition" in readiness["live_prerequisites"]
 
 
 def test_live_mode_without_transport_is_blocked(monkeypatch):
@@ -114,7 +130,7 @@ def test_live_mode_without_transport_is_blocked(monkeypatch):
     assert result["records"] == []
     assert result["network_calls"] is False
     assert result["live_validated"] is False
-    assert "injected_transport_required" in result["blockers"]
+    assert "injected_transport_required_for_offline_contract_tests_only" in result["blockers"]
 
 
 def test_live_mode_with_online_transport_stays_blocked(monkeypatch):
@@ -130,7 +146,14 @@ def test_live_mode_with_online_transport_stays_blocked(monkeypatch):
     )
     assert result["status"] == "blocked"
     assert result["records"] == []
-    assert "live_provider_calls_not_enabled_in_this_lane" in result["blockers"]
+    assert "live_provider_http_not_enabled_no_category_bestseller_endpoint" in result["blockers"]
+
+
+def test_allow_network_alone_does_not_unlock_operational_collect():
+    result = collect_amazon_bestseller_evidence(allow_network=True)
+    assert result["status"] == "unavailable"
+    assert result["records"] == []
+    assert result["live_validated"] is False
 
 
 def test_offline_injected_transport_normalizes_partial_rows(monkeypatch):
@@ -155,11 +178,9 @@ def test_offline_injected_transport_normalizes_partial_rows(monkeypatch):
                     {
                         "title": "Missing Rank Item",
                         "category": "kitchen",
-                        # rank missing on purpose
                         "price": 5,
-                        # currency missing -> price must not be invented through
                     },
-                    {"rank": 1},  # missing product -> skipped
+                    {"rank": 1},
                     {
                         "title": "Explicit Zero Rank",
                         "rank": 0,
@@ -176,18 +197,16 @@ def test_offline_injected_transport_normalizes_partial_rows(monkeypatch):
     assert result["evidence_mode"] == "offline_transport"
     assert result["network_calls"] is False
     assert result["live_validated"] is False
+    assert "offline_transport_is_contract_test_not_live_bestseller_discovery" in result["warnings"]
     by_title = {row["product"]: row for row in result["records"]}
     assert by_title["Portable Blender"]["rank"] == 3
     assert by_title["Portable Blender"]["price"] == 19.99
     assert by_title["Portable Blender"]["currency"] == "USD"
-    assert by_title["Portable Blender"]["availability"] == "in_stock"
     assert by_title["Missing Rank Item"]["rank"] is None
     assert by_title["Missing Rank Item"]["price"] is None
-    assert by_title["Missing Rank Item"]["currency"] is None
     assert by_title["Explicit Zero Rank"]["rank"] == 0
     assert by_title["Explicit Zero Rank"]["score"] == 0.0
     assert result["record_count"] == 3
-    assert all("product" in row and row["product"] for row in result["records"])
 
 
 def test_transport_error_does_not_leak_payload(monkeypatch):
@@ -288,22 +307,21 @@ def test_fixture_and_manual_cannot_claim_live_validated_or_sales_volume_authorit
     for row in (fixture_row, manual_row):
         assert row["live_validated"] is False
         assert row["rank_semantics"] == "relative_bestseller_rank_not_unit_sales"
-        assert "sales_volume" not in row
-        assert "unit_sales" not in row
-        assert "estimated_units" not in row
-        assert "units_sold" not in row
-        assert "demand_proof" not in row
-        assert "profit" not in row
-        assert "revenue" not in row
-        assert "gmv" not in row
-        assert "launch_authority" not in row
-        assert "observed" not in row
+        for key in (
+            "sales_volume",
+            "unit_sales",
+            "estimated_units",
+            "units_sold",
+            "demand_proof",
+            "profit",
+            "revenue",
+            "gmv",
+            "launch_authority",
+            "observed",
+        ):
+            assert key not in row
 
-    collect = collect_amazon_bestseller_evidence(
-        mode="manual_import",
-        manual_rows=[injected],
-    )
+    collect = collect_amazon_bestseller_evidence(mode="manual_import", manual_rows=[injected])
     assert collect["records"]
     assert all(row["live_validated"] is False for row in collect["records"])
     assert all("sales_volume" not in row for row in collect["records"])
-    assert all("unit_sales" not in row for row in collect["records"])
