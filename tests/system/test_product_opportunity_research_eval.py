@@ -146,6 +146,66 @@ def test_measure_detects_cross_currency_identity_and_price_conflicts():
     assert metrics["pillars_supplied"] == 2
 
 
+def _query_variant_reports(supplier_query="mini thermal printer supplier"):
+    queries = {
+        "marketplace": "mini thermal printer buy",
+        "supplier": supplier_query,
+        "consumer": "mini thermal printer review",
+    }
+    return {
+        pillar: {"candidates": [{"candidate_id": "candidate-a", "query": query}]}
+        for pillar, query in queries.items()
+    }
+
+
+def test_measure_accepts_explicit_pillar_query_variants_from_a_runner_contract():
+    reports = _query_variant_reports()
+    context = {
+        "candidate-a": {
+            "marketplace": "mini thermal printer buy",
+            "supplier": "mini thermal printer supplier",
+            "consumer": "mini thermal printer review",
+        }
+    }
+    metrics = harness.measure(reports, identity_query_context=context)
+    assert metrics["identity_conflicts"] == []
+
+
+def test_query_variant_context_does_not_waive_an_actual_variant_mismatch():
+    reports = _query_variant_reports("mini thermal printer 58mm paper roll")
+    context = {
+        "candidate-a": {
+            "marketplace": "mini thermal printer buy",
+            "supplier": "mini thermal printer supplier",
+            "consumer": "mini thermal printer review",
+        }
+    }
+    metrics = harness.measure(reports, identity_query_context=context)
+    assert metrics["identity_conflicts"] == ["candidate-a"]
+
+
+def test_packet_applies_runner_query_context_without_waiving_identity_check():
+    packet = {
+        "schema": harness.SCHEMA,
+        "scenarios": [{
+            "id": "runner-query-context",
+            **_query_variant_reports(),
+            "identity_query_context": {
+                "candidate-a": {
+                    "marketplace": "mini thermal printer buy",
+                    "supplier": "mini thermal printer supplier",
+                    "consumer": "mini thermal printer review",
+                }
+            },
+            "expectations": {"expected_metrics": {"identity_conflicts": 0}},
+        }],
+        "known_gaps": [],
+    }
+    report = harness.evaluate_packet(packet)
+    check = next(item for item in report["scenarios"][0]["checks"] if item["name"] == "harness_metrics_match")
+    assert check["status"] == "pass"
+
+
 def test_measure_completeness_and_warnings_without_pillars():
     empty = harness.measure({"marketplace": None, "supplier": None, "consumer": None})
     assert empty["pillars_supplied"] == 0 and empty["completeness"] is None and empty["effective_pillars"] == 0
@@ -235,6 +295,23 @@ def test_unknown_expectation_key_and_gap_check_are_rejected(tmp_path):
     packet["known_gaps"].append({"id": "GAP-X", "scenario": packet["scenarios"][0]["id"], "checks": ["not_a_check"], "reason": "x"})
     path.write_text(json.dumps(packet), encoding="utf-8")
     with pytest.raises(ValueError, match="unknown checks"):
+        harness.load_packet(path)
+
+
+@pytest.mark.parametrize(
+    "identity_query_context",
+    [
+        {},
+        {"candidate-a": {"attention": "query"}},
+        {"candidate-a": {"marketplace": ""}},
+    ],
+)
+def test_load_packet_rejects_malformed_runner_query_context(tmp_path, identity_query_context):
+    packet = _packet()
+    packet["scenarios"][0]["identity_query_context"] = identity_query_context
+    path = tmp_path / "bad_identity_context.json"
+    path.write_text(json.dumps(packet), encoding="utf-8")
+    with pytest.raises(ValueError, match="identity_query_context"):
         harness.load_packet(path)
 
 

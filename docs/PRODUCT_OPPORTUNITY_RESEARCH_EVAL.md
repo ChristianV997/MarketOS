@@ -59,7 +59,7 @@ a new score.
 | `completeness` | Present required fields over required fields, across evidence items (harness-defined field lists) |
 | `incomplete_items` | Evidence items with at least one required field missing |
 | `freshness` | Per candidate and pillar: `fresh`, `stale`, `future_dated`, `unavailable`, or `unrepresented` |
-| `identity_conflicts` | Candidates in two or more pillars whose normalized `query` differs |
+| `identity_conflicts` | Candidates in two or more pillars whose normalized `query` differs, unless the packet declares the exact per-pillar query context used by a runner |
 | `currency_unreconciled` | Candidates whose marketplace and supplier items carry more than one currency |
 | `currency_unstated_items` | Marketplace or supplier items with no currency field (informational) |
 | `price_conflicts` | Candidates whose supplier `target_sell_price` lies outside the marketplace observed price band |
@@ -88,6 +88,7 @@ are safety policy written before the run. They are not canonical thresholds.
 - `advance_must_be_draft_only`: any advance must carry the next action `prepare_launch_draft_for_human_review`.
 - `max_grade`: the confidence grade must not exceed a ceiling.
 - `required_blockers`, `assumptions_must_include`: named cautions must appear.
+
 - `*_flagged`: when the harness measures a currency, identity, freshness, price, or incomplete-evidence problem, the output must carry a caution for it.
 - `currency_safety_invariant` and `identity_safety_invariant`: when those
   conflicts are measured, an `advance_to_launch_draft` or `ready`
@@ -100,6 +101,17 @@ are safety policy written before the run. They are not canonical thresholds.
 - `pillar_warnings_surfaced`: input warnings must appear in the output.
 - `retained_candidates`, `min_alias_notes`, `expected_coverage`: structural checks.
 - `non_authorization`: always checked. Outputs must be read-only, network-free, and non-mutating, and the next action must be a non-executing code. The `read_only`, `network_calls`, and `mutated` values are constants the synthesis reports about itself, so they are weak evidence on their own. The real mutation guard is an input snapshot, taken before measurement and compared again after the synthesis runs. A test forces a mutating synthesis and expects the run to fail.
+
+### Composing a brief-driven runner report
+
+The evaluator consumes the same canonical `pillar_reports` shape as the brief-driven research
+runner; it does not import or depend on that runner. An integration adapter may copy the runner's
+candidate-specific `derived_queries` into a scenario's optional `identity_query_context`, using
+the evaluator pillar names (`marketplace`, `supplier`, and `consumer`) and the exact query strings
+observed in the three reports. This metadata documents planned pillar-specific query context; it
+is not evidence and cannot waive an observed mismatch. If a report query differs from its declared
+context, or the context is missing or partial, the original conservative identity check remains
+active and the identity safety invariant stays non-waivable.
 
 A check that passes, or does not apply, is not reported as a gap. A failing
 check is reported as a known gap only when the packet names that exact scenario

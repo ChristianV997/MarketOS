@@ -15,6 +15,7 @@ import copy
 import hashlib
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -125,6 +126,17 @@ def load_packet(path: Path = PACKET_PATH) -> dict[str, Any]:
         unknown_metrics = sorted(set(metrics) - METRIC_KEYS)
         if unknown_metrics:
             raise ValueError(f"unknown expected_metrics keys in {scenario['id']}: {unknown_metrics}")
+        identity_query_context = scenario.get("identity_query_context")
+        if identity_query_context is not None:
+            if not isinstance(identity_query_context, dict) or not identity_query_context:
+                raise ValueError(f"identity_query_context must be a non-empty object in {scenario['id']}")
+            for candidate_id, queries in identity_query_context.items():
+                if not isinstance(candidate_id, str) or not candidate_id.strip():
+                    raise ValueError(f"identity_query_context candidate ids must be non-empty in {scenario['id']}")
+                if not isinstance(queries, dict) or not queries or set(queries) - set(PILLARS):
+                    raise ValueError(f"identity_query_context pillars must be valid in {scenario['id']}")
+                if any(not isinstance(query, str) or not query.strip() for query in queries.values()):
+                    raise ValueError(f"identity_query_context queries must be non-empty strings in {scenario['id']}")
     gap_ids = [gap.get("id") for gap in data.get("known_gaps", [])]
     if len(gap_ids) != len(set(gap_ids)) or not all(gap_ids):
         raise ValueError("known gap ids must be present and unique")
@@ -161,6 +173,26 @@ def _candidates(report: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     return {str(item["candidate_id"]): item for item in report.get("candidates", []) if isinstance(item, dict) and item.get("candidate_id")}
 
 
+def _identity_conflict(
+    candidate_id: str,
+    present: list[str],
+    maps: dict[str, dict[str, dict[str, Any]]],
+    identity_query_context: Mapping[str, Mapping[str, str]] | None,
+) -> bool:
+    """Treat declared pillar-specific runner queries as context, not identity evidence.
+
+    A brief-driven runner intentionally asks different queries for each evidence pillar. When
+    the packet declares those exact planned queries, compare observed values to that context;
+    an observed deviation remains a non-waivable identity conflict. Missing or partial context
+    keeps the original conservative cross-pillar comparison.
+    """
+    observed = {pillar: _norm(maps[pillar][candidate_id].get("query")) for pillar in present}
+    expected = (identity_query_context or {}).get(candidate_id)
+    if isinstance(expected, Mapping) and all(pillar in expected for pillar in present):
+        return any(observed[pillar] != _norm(expected[pillar]) for pillar in present)
+    return len(set(observed.values())) > 1
+
+
 def _economics(candidate: dict[str, Any] | None) -> dict[str, Any]:
     score = (candidate or {}).get("score", {})
     economics = score.get("economics", {}) if isinstance(score, dict) else {}
@@ -192,7 +224,11 @@ def _freshness_class(statuses: list[str]) -> str:
     return "fresh"
 
 
-def measure(reports: dict[str, dict[str, Any] | None]) -> dict[str, Any]:
+def measure(
+    reports: dict[str, dict[str, Any] | None],
+    *,
+    identity_query_context: Mapping[str, Mapping[str, str]] | None = None,
+) -> dict[str, Any]:
     maps = {pillar: _candidates(reports.get(pillar)) for pillar in PILLARS}
     pillars_supplied = sum(1 for pillar in PILLARS if maps[pillar])
     effective_pillars = 0
@@ -232,7 +268,7 @@ def measure(reports: dict[str, dict[str, Any] | None]) -> dict[str, Any]:
     all_ids = sorted(set().union(*(set(maps[pillar]) for pillar in PILLARS)))
     for candidate_id in all_ids:
         present = [pillar for pillar in PILLARS if candidate_id in maps[pillar]]
-        if len(present) > 1 and len({_norm(maps[pillar][candidate_id].get("query")) for pillar in present}) > 1:
+        if len(present) > 1 and _identity_conflict(candidate_id, present, maps, identity_query_context):
             identity_conflicts.append(candidate_id)
         currencies: set[str] = set()
         for pillar in ("marketplace", "supplier"):
@@ -443,7 +479,7 @@ def evaluate_packet(packet: dict[str, Any], *, only: set[str] | None = None) -> 
             continue
         inputs = {pillar: _resolve_report(scenario.get(pillar)) for pillar in PILLARS}
         snapshot = copy.deepcopy(inputs)
-        metrics = measure(inputs)
+        metrics = measure(inputs, identity_query_context=scenario.get("identity_query_context"))
         if inputs != snapshot:
             raise RuntimeError(f"measure mutated inputs for {scenario['id']}")
         # The synthesis receives the same objects the snapshot was taken from, so a mutating
