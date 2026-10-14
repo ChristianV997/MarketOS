@@ -1,0 +1,91 @@
+{
+  "_provenance": "SYNTHETIC. Invented advertisers, identifiers, copy and tokens for offline contract tests. Not a captured provider response and not a live ad or performance outcome. Mapped field names are a subset of the Archived Ad reference; see docs/META_AD_LIBRARY_EVIDENCE.md.",
+  "http_status": 200,
+  "headers": {},
+  "body": {
+    "data": [
+      {
+        "id": "900000001",
+        "page_id": "100000001",
+        "page_name": "Synthetic Kitchen Co",
+        "ad_creation_time": "2026-08-01T09:00:00+0000",
+        "ad_creative_bodies": ["Synthetic countertop organiser for small kitchens. Ships in two days."],
+        "ad_delivery_start_time": "2026-08-01T10:00:00+0000",
+        "ad_delivery_stop_time": null,
+        "ad_reached_countries": ["US", "CA"],
+        "publisher_platforms": ["facebook", "instagram"],
+        "ad_snapshot_url": "https://ads.example.invalid/render?ad_id=900000001&access_token=SYNTHETIC_TOKEN_CANARY_0001",
+        "spend": {"lower_bound": "100", "upper_bound": "199"},
+        "impressions": {"lower_bound": "1000", "upper_bound": "1999"},
+        "target_ages": ["25-34"],
+        "target_gender": "all",
+        "target_locations": [{"name": "Synthetic Region", "type": "region"}],
+        "delivery_by_region": [{"region": "Synthetic Region", "percentage": "0.5"}]
+      },
+      {
+        "id": "900000002",
+        "page_id": "100000002",
+        "page_name": "Synthetic Desk Lab",
+        "ad_creative_bodies": ["Synthetic standing desk. Write to owner@example.invalid for a quote."],
+        "ad_delivery_start_time": "2026-07-15T08:00:00Z",
+        "ad_delivery_stop_time": "2026-08-10T08:00:00Z",
+        "ad_reached_countries": ["US"],
+        "publisher_platforms": ["facebook"],
+        "ad_snapshot_url": "https://ads.example.invalid/render?ad_id=900000002"
+      },
+      {
+        "id": "900000003",
+        "page_id": "100000003",
+        "page_name": "Synthetic Tea Merchant",
+        "ad_creative_bodies": ["Synthetic loose-leaf tea sampler."],
+        "ad_delivery_start_time": "2026-08-02T06:30:00+00:00",
+        "ad_reached_countries": ["GB"],
+        "publisher_platforms": ["instagram"],
+        "ad_snapshot_url": "https://ads.example.invalid/render?ad_id=900000003"
+      },
+      {
+        "id": "900000004",
+        "page_id": "100000004",
+        "page_name": "Synthetic Garden Supply",
+        "ad_creative_bodies": ["Synthetic raised garden bed kit."],
+        "ad_delivery_start_time": "2026-13-40T00:00:00Z",
+        "ad_reached_countries": ["US"],
+        "publisher_platforms": ["facebook"],
+        "ad_snapshot_url": "https://ads.example.invalid/render?ad_id=900000004"
+      },
+      {
+        "page_id": "100000005",
+        "page_name": "Synthetic Orphan Entry",
+        "ad_creative_bodies": ["Entry without an ad identifier is dropped."],
+        "ad_delivery_start_time": "2026-08-03T00:00:00+00:00",
+        "ad_reached_countries": ["US"]
+      },
+      {
+        "id": "900000005",
+        "page_id": "abc-not-numeric",
+        "page_name": "Synthetic Bike Works",
+        "ad_creative_bodies": [
+          "Synthetic folding bicycle for city commuters. Lightweight aluminium frame, tool-free seat post adjustment, and a five-year frame warranty on every unit sold through this page, with free returns inside thirty days and a printed quick-start guide in the box for first-time riders who want to adjust the saddle height without any tools at all."
+        ],
+        "ad_delivery_start_time": "2026-08-05T00:00:00+00:00",
+        "ad_delivery_stop_time": "2026-08-04T00:00:00+00:00",
+        "ad_reached_countries": ["US", "usa", 12],
+        "publisher_platforms": ["facebook", "Not A Platform"],
+        "ad_snapshot_url": "http://ads.example.invalid/render?ad_id=900000005"
+      },
+      {
+        "id": "900000006",
+        "page_id": "100000006",
+        "page_name": "Synthetic Lamp Studio",
+        "ad_creative_bodies": ["Synthetic desk lamp with warm light."],
+        "ad_delivery_start_time": "2026-08-06T00:00:00+00:00",
+        "publisher_platforms": ["instagram"],
+        "ad_snapshot_url": "https://ads.example.invalid/render?ad_id=900000006"
+      },
+      "not-a-mapping-entry"
+    ],
+    "paging": {
+      "next": "https://graph.example.invalid/ads_archive?after=SYNTHETIC_CURSOR&access_token=SYNTHETIC_TOKEN_CANARY_0002"
+    }
+  }
+}
