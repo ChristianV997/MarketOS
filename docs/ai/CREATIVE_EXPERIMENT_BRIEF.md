@@ -16,9 +16,11 @@ Planning output for one product candidate. It is not an ad, a campaign, or a pub
 
 ## Outcomes
 
-`draft_brief` requires a real candidate id, observed attention on the requested geography and language, a customer problem, and at least one message hypothesis. Each of those strings points at an attention evidence field. When the attention candidate includes `freshness_statuses`, that set must be only `fresh`. The report stores a set, not a per-record index, so `stale`, `future_dated`, `unavailable`, or a mixed set is not attributed to one row and does not become a draft.
+`draft_brief` requires a real candidate id, observed attention on the requested geography and language, a customer problem, and at least one message hypothesis. Each hypothesis carries `MarketOS.CreativeEvidenceRef.v1`: allowlisted source, evidence class, deterministic `snapshot:` id, record index, observed time, geography, language, field, freshness, conflict state, and a bounded source reference. The digest identifies that sanitized snapshot. It does not authenticate the source.
 
-`insufficient_evidence` is the safe result when the candidate is missing, attention is missing, observations conflict, freshness is not exclusively fresh, the region or language does not match, market labels are absent, or the only offered lines are unsupported claims.
+`candidate_id` on a ref is only the attention-report row. It is not cross-source identity. An `observation_id` is copied only when the evidence record already contains one. `exact_match` is applied only when that id is present in an optional `product-identity-synthesis-handoff-v1` map with `match_state` `exact_match`. Candidate hints, titles, and `#483` insight ids are not a join. `AttentionInsight.to_dict` does not publish `observation_id`, so those insights stay source-local and are not turned into hypotheses.
+
+`insufficient_evidence` is the safe result when the candidate is missing, attention is missing, observations conflict, freshness is not exclusively fresh, the region or language does not match, market labels are absent, or the only offered lines are unsupported claims. Stale and conflicting rows stay unselected. Their text is not copied into the problem or hypotheses.
 
 CPA, CTR, budget, lift, and scale thresholds stay `label: assumption`. Missing numbers stay `unevaluated`. Lift is never invented. `financial_fact` stays false.
 
@@ -31,6 +33,7 @@ CPA, CTR, budget, lift, and scale thresholds stay `label: assumption`. Missing n
 ```
 python -m pytest -q tests/test_creative_experiment_brief.py
 python scripts/run_creative_experiment_brief.py --synthesis report.json --attention attention.json --geography MX --language es
+python scripts/run_creative_experiment_brief.py --synthesis report.json --attention attention.json --identity-handoff handoff.json --geography MX --language es
 ```
 
 ## Rollback

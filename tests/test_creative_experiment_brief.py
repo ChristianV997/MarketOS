@@ -327,11 +327,29 @@ def test_cli_links_only_current_matching_attention(tmp_path: Path):
     assert fresh["customer_problem"]["product_fact"] is False
     assert fresh["customer_problem"]["statement"] == "wrinkles before a meeting"
     ref = fresh["customer_problem"]["evidence_refs"][0]
+    assert ref["schema"] == "MarketOS.CreativeEvidenceRef.v1"
     assert ref["source"] == "consumer_attention.candidates.evidence"
     assert ref["record_index"] == 0
     assert ref["field"] == "pain_point"
     assert ref["evidence_mode"] == "observed"
-    assert set(ref) == {"source", "candidate_id", "record_index", "field", "evidence_mode"}
+    assert ref["evidence_class"] == "observed"
+    assert ref["freshness"] == "fresh"
+    assert ref["conflict_state"] == "none"
+    assert ref["observed_at"] == "2026-05-01T00:00:00Z"
+    assert ref["geography"] == "MX"
+    assert ref["language"] == "es"
+    assert ref["source_reference"] == "fixture-note"
+    assert ref["snapshot_digest_authenticates_source"] is False
+    assert ref["report_snapshot_id"].startswith("snapshot:")
+    assert ref["candidate_id_is_cross_source_identity"] is False
+    assert ref["identity"]["linkage"] == "source_local_unlinked"
+    assert "observation_id" not in ref["identity"]
+    assert fresh["evidence_lineage"]["schema"] == "MarketOS.CreativeEvidenceLineage.v1"
+    assert fresh["evidence_lineage"]["report_snapshot_id"] == ref["report_snapshot_id"]
+    assert fresh["evidence_lineage"]["snapshot_digest_authenticates_source"] is False
+    assert fresh["evidence_lineage"]["identity"]["linkage"] == "source_local_unlinked"
+    assert fresh["evidence_lineage"]["identity"]["candidate_id_is_cross_source_identity"] is False
+    assert fresh["hypotheses"][0]["evidence_refs"][0]["report_snapshot_id"] == ref["report_snapshot_id"]
     assert fresh["hypotheses"][0]["product_fact"] is False
     assert fresh["hypotheses"][0]["status"] == "testable_draft"
     assert fresh["authority"]["spend_authorized"] is False
@@ -352,6 +370,9 @@ def test_cli_links_only_current_matching_attention(tmp_path: Path):
     assert "stale_attention_evidence" in stale["insufficient_evidence_reasons"]
     assert stale["customer_problem"] is None
     assert stale["hypotheses"] == []
+    assert stale["evidence_lineage"]["freshness_statuses"] == ["stale"]
+    assert stale["evidence_lineage"]["linked_fields"] == []
+    assert "wrinkles before a meeting" not in json.dumps(stale["evidence_lineage"])
     assert "wrinkles before a meeting" not in json.dumps(stale["customer_problem"])
     assert "show the collar before the meeting" not in json.dumps(stale["hypotheses"])
 
@@ -416,3 +437,179 @@ def test_cli_links_only_current_matching_attention(tmp_path: Path):
     assert language["customer_problem"] is None
     assert language["hypotheses"] == []
     assert "show it in english" not in json.dumps(language["hypotheses"])
+
+
+def _run_cli(tmp_path: Path, attention: dict, handoff: dict | None = None) -> subprocess.CompletedProcess[str]:
+    folder = tmp_path / "case"
+    folder.mkdir(parents=True)
+    synthesis = folder / "synthesis.json"
+    report = folder / "attention.json"
+    synthesis.write_text(
+        json.dumps(_synthesis(top_hooks=["show the collar before the meeting"])),
+        encoding="utf8",
+    )
+    report.write_text(json.dumps(attention), encoding="utf8")
+    command = [
+        sys.executable,
+        str(ROOT / "scripts" / "run_creative_experiment_brief.py"),
+        "--synthesis",
+        str(synthesis),
+        "--attention",
+        str(report),
+        "--geography",
+        "MX",
+        "--language",
+        "es",
+    ]
+    if handoff is not None:
+        path = folder / "handoff.json"
+        path.write_text(json.dumps(handoff), encoding="utf8")
+        command.extend(["--identity-handoff", str(path)])
+    return subprocess.run(command, check=False, capture_output=True, text=True, cwd=ROOT)
+
+
+def _manual_attention(**extra):
+    record = {
+        "candidate_id": "cand-1",
+        "pain_point": "wrinkles before a meeting",
+        "hook": "show the collar before the meeting",
+        "objection": "thick fabric may not respond",
+        "angle": "demo",
+        "geography": "MX",
+        "language": "es",
+        "evidence_mode": "observed",
+        "observed_at": "2026-05-01T00:00:00Z",
+        "source": "fixture-note",
+    }
+    record.update(extra)
+    return {
+        "candidates": [
+            {
+                "candidate_id": "cand-1",
+                "freshness_statuses": ["fresh"],
+                "conflicting_observation_keys": [],
+                "evidence": [record],
+            }
+        ]
+    }
+
+
+def test_cli_identity_boundary_does_not_invent_observation_ids(tmp_path: Path):
+    insight = {
+        "insight_id": "theme:cand-1:demo",
+        "candidate_id": "cand-1",
+        "kind": "demand_theme",
+        "statement": "insight-only phrase about steamers",
+        "signal_family": "review",
+        "sources": ["fixture-note"],
+        "platforms": ["manual"],
+        "geographies": ["MX"],
+        "languages": ["es"],
+        "observation_window": {
+            "earliest": None,
+            "latest": None,
+            "freshness": ["fresh"],
+            "missing_time_count": 0,
+            "as_of": None,
+        },
+        "aggregate_counts": {"evidence_count": 1},
+        "evidence_class": "observed",
+        "uncertainty": [],
+        "contradictions": [],
+        "unsupported_claims": [],
+        "supporting_excerpts": [],
+    }
+    hinted = brief.build_creative_experiment_brief(
+        synthesis=_synthesis(top_hooks=["show the collar before the meeting"]),
+        consumer_attention=_report(_evidence()),
+        target_geography="MX",
+        target_language="es",
+        identity_handoff={
+            "contract_version": "product-identity-synthesis-handoff-v1",
+            "candidate_id_hint_is_not_exact_basis": True,
+            "by_observation_id": {"cand-1": {"match_state": "exact_match", "candidate_key": "ck-from-candidate-id"}},
+        },
+        consumer_insights=insight,
+    )
+    rendered = json.dumps(hinted)
+    assert hinted["outcome"] == "draft_brief"
+    assert hinted["evidence_lineage"]["identity"]["linkage"] == "source_local_unlinked"
+    assert hinted["evidence_lineage"]["insight_boundary"]["observation_id_present"] is False
+    assert hinted["evidence_lineage"]["insight_boundary"]["statements_used_as_hypotheses"] is False
+    assert hinted["evidence_lineage"]["identity"]["required_upstream_contract"]["name"] == (
+        "product-identity-synthesis-handoff-v1"
+    )
+    assert "insight-only phrase about steamers" not in rendered
+    assert "ck-from-candidate-id" not in rendered
+    assert "observation_id" not in set(_walk_keys(hinted))
+
+    exact_handoff = {
+        "contract_version": "product-identity-synthesis-handoff-v1",
+        "auto_merge_allowed_states": ["exact_match"],
+        "by_observation_id": {"obs-exact-1": {"match_state": "exact_match", "candidate_key": "ck-exact-1"}},
+    }
+    exact_run = _run_cli(tmp_path / "exact", _manual_attention(observation_id="obs-exact-1"), exact_handoff)
+    assert exact_run.returncode == 0, exact_run.stderr
+    exact = json.loads(exact_run.stdout)
+    identity = exact["hypotheses"][0]["evidence_refs"][0]["identity"]
+    assert identity["linkage"] == "exact_match"
+    assert identity["observation_id"] == "obs-exact-1"
+    assert identity["candidate_key"] == "ck-exact-1"
+    assert identity["candidate_id_is_cross_source_identity"] is False
+    assert exact["evidence_lineage"]["identity"]["linkage"] == "exact_match"
+    _authority(exact)
+
+    possible = {
+        "contract_version": "product-identity-synthesis-handoff-v1",
+        "by_observation_id": {"obs-exact-1": {"match_state": "possible_match", "candidate_key": "ck-maybe"}},
+    }
+    possible_run = _run_cli(tmp_path / "possible", _manual_attention(observation_id="obs-exact-1"), possible)
+    assert possible_run.returncode == 0, possible_run.stderr
+    possible_doc = json.loads(possible_run.stdout)
+    assert possible_doc["evidence_lineage"]["identity"]["linkage"] == "source_local_unlinked"
+    assert "ck-maybe" not in possible_run.stdout
+    assert possible_doc["hypotheses"][0]["evidence_refs"][0]["identity"]["linkage"] == "source_local_unlinked"
+
+    marker = "OVERSIZE-MARKER-9f3a"
+    oversized = _run_cli(tmp_path / "oversize", _manual_attention(source=("S" * 100) + marker))
+    assert oversized.returncode == 0, oversized.stderr
+    oversized_doc = json.loads(oversized.stdout)
+    assert marker not in oversized.stdout
+    assert oversized_doc["hypotheses"][0]["evidence_refs"][0]["source_reference"] is None
+
+    canary = "lineage-canary@example.com"
+    leaked = _run_cli(tmp_path / "canary", _manual_attention(pain_point=canary))
+    assert leaked.returncode == 2
+    assert canary not in leaked.stdout
+    assert canary not in leaked.stderr
+    assert json.loads(leaked.stdout)["error"] == "malformed creative brief input"
+
+    phone = _run_cli(tmp_path / "phone", _manual_attention(objection="call 555-010-0199"))
+    assert phone.returncode == 2
+    assert "555-010-0199" not in phone.stdout
+
+    malformed = _run_cli(
+        tmp_path / "malformed",
+        _manual_attention(),
+        {"by_observation_id": ["MALFORMED-HANDOFF-BLOB-7731"]},
+    )
+    assert malformed.returncode == 2
+    assert "MALFORMED-HANDOFF-BLOB-7731" not in malformed.stdout
+
+    huge_id = "o" * 90
+    huge = _run_cli(tmp_path / "huge-id", _manual_attention(observation_id=huge_id), exact_handoff)
+    assert huge.returncode == 2
+    assert huge_id not in huge.stdout
+
+    supplied = _manual_attention()
+    supplied["report_snapshot_id"] = "snapshot:" + ("ab" * 16)
+    supplied_run = _run_cli(tmp_path / "supplied", supplied)
+    assert supplied_run.returncode == 0, supplied_run.stderr
+    supplied_doc = json.loads(supplied_run.stdout)
+    assert supplied_doc["evidence_lineage"]["supplied_report_snapshot_id"] == supplied["report_snapshot_id"]
+    assert supplied_doc["evidence_lineage"]["report_snapshot_id"] != supplied["report_snapshot_id"]
+    again = _run_cli(tmp_path / "supplied-again", supplied)
+    assert (
+        json.loads(again.stdout)["evidence_lineage"]["snapshot_digest"]
+        == (supplied_doc["evidence_lineage"]["snapshot_digest"])
+    )

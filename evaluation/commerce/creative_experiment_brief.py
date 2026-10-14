@@ -7,6 +7,8 @@ spend, target, publish, export a client packet, or start a campaign.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from typing import Any, Mapping, Sequence
 
@@ -14,10 +16,19 @@ from evaluation.commerce.consumer_attention import normalize_geography, normaliz
 from evaluation.commerce.launch_draft_pack import build_launch_draft_pack
 
 SCHEMA = "MarketOS.CreativeExperimentBrief.v1"
+REF_SCHEMA = "MarketOS.CreativeEvidenceRef.v1"
+LINEAGE_SCHEMA = "MarketOS.CreativeEvidenceLineage.v1"
+_EVIDENCE_SOURCE = "consumer_attention.candidates.evidence"
 _LIMIT = 180
+_REF_LIMIT = 80
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _SECRET_VALUE = re.compile(r"(?:api[_-]?key|access[_-]?token|secret[_-]?key|password)\s*[:=]\s*\S{6,}", re.I)
+_PERSONAL = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|\b\d{3}-\d{3}-\d{4}\b")
+_OBSERVATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$")
+_INSTANT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+_SNAPSHOT_ID = re.compile(r"^snapshot:[a-f0-9]{32}$")
 _SECRET_KEYS = frozenset({"cj_api_key", "authorization", "access_token", "secret_key", "password", "api_key"})
+_UNSAFE_KEYS = _SECRET_KEYS | frozenset({"email", "phone", "raw_payload", "ssn", "customer_email"})
 _THRESHOLD_FIELDS = (
     ("break_even_cpa", "cpa"),
     ("kill_if_cpa_above", "cpa"),
@@ -49,7 +60,7 @@ def _secret_key(value: Any) -> bool:
     if not isinstance(value, str):
         return False
     lowered = value.strip().lower().replace("-", "_")
-    return lowered in _SECRET_KEYS or lowered.endswith(("_access_token", "_api_key", "_secret", "_password"))
+    return lowered in _UNSAFE_KEYS or lowered.endswith(("_access_token", "_api_key", "_secret", "_password"))
 
 
 def _require_safe(*values: Any) -> None:
@@ -64,7 +75,9 @@ def _require_safe(*values: Any) -> None:
             for item in value:
                 _require_safe(item)
             continue
-        if isinstance(value, str) and (_CONTROL.search(value) or _SECRET_VALUE.search(value)):
+        if isinstance(value, str) and (
+            _CONTROL.search(value) or _SECRET_VALUE.search(value) or _PERSONAL.search(value)
+        ):
             raise ValueError("unsafe creative brief input")
 
 
@@ -186,18 +199,173 @@ def _matches(record: Mapping[str, Any], geography: str, language: str) -> bool:
     )
 
 
-def _ref(candidate_id: str, index: int, field: str) -> dict[str, Any]:
+def _bounded(value: Any, limit: int = _REF_LIMIT) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = re.sub(r"\s+", " ", value).strip()
+    if not text or len(text) > limit or _CONTROL.search(text):
+        return None
+    return text
+
+
+def _instant(value: Any) -> str | None:
+    if not isinstance(value, str) or not _INSTANT.fullmatch(value.strip()):
+        return None
+    return value.strip()
+
+
+def _supplied_observation_id(record: Mapping[str, Any]) -> str | None:
+    """Return an id only when the record already has one. Never derive one."""
+    if "observation_id" not in record:
+        return None
+    value = record.get("observation_id")
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str) or not _OBSERVATION_ID.fullmatch(value.strip()):
+        raise ValueError("unsafe creative brief input")
+    return value.strip()
+
+
+def _handoff_index(handoff: Mapping[str, Any] | None) -> dict[str, Mapping[str, Any]]:
+    if handoff is None:
+        return {}
+    if not isinstance(handoff, Mapping):
+        raise ValueError("unsafe creative brief input")
+    raw = handoff.get("by_observation_id")
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise ValueError("unsafe creative brief input")
+    index: dict[str, Mapping[str, Any]] = {}
+    for key, item in raw.items():
+        if not isinstance(key, str) or not _OBSERVATION_ID.fullmatch(key.strip()) or not isinstance(item, Mapping):
+            raise ValueError("unsafe creative brief input")
+        index[key.strip()] = item
+    return index
+
+
+def _identity(record: Mapping[str, Any], handoff: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """Join only a supplied observation id with match_state exact_match."""
+    base: dict[str, Any] = {
+        "linkage": "source_local_unlinked",
+        "candidate_id_is_cross_source_identity": False,
+    }
+    observation_id = _supplied_observation_id(record)
+    if observation_id is None:
+        return base
+    base["observation_id"] = observation_id
+    entry = handoff.get(observation_id)
+    if not isinstance(entry, Mapping) or entry.get("match_state") != "exact_match":
+        return base
+    candidate_key = entry.get("candidate_key")
+    if not isinstance(candidate_key, str) or not _OBSERVATION_ID.fullmatch(candidate_key.strip()):
+        return base
     return {
-        "source": "consumer_attention.candidates.evidence",
-        "candidate_id": candidate_id,
-        "record_index": index,
-        "field": field,
+        "linkage": "exact_match",
+        "observation_id": observation_id,
+        "candidate_key": candidate_key.strip(),
+        "match_state": "exact_match",
+        "candidate_id_is_cross_source_identity": False,
+    }
+
+
+def _snapshot(
+    candidate_id: str,
+    records: Sequence[Mapping[str, Any]],
+    attention_row: Mapping[str, Any] | None,
+    conflict_keys: Sequence[str],
+) -> tuple[str, str]:
+    freshness = None
+    if attention_row is not None and "freshness_statuses" in attention_row:
+        raw = attention_row.get("freshness_statuses")
+        freshness = list(raw) if isinstance(raw, list) else None
+    rows = []
+    for index, record in enumerate(records):
+        rows.append(
+            {
+                "index": index,
+                "evidence_mode": _bounded(str(record.get("evidence_mode") or ""), 40),
+                "geography": _bounded(record.get("geography")),
+                "language": _bounded(record.get("language")),
+                "observed_at": _instant(record.get("observed_at")),
+                "source_reference": _bounded(record.get("source")),
+                "fields": {name: _clip(record.get(name)) for name in _QUOTE_FIELDS},
+            }
+        )
+    payload = {
+        "source": _EVIDENCE_SOURCE,
+        "report_local_candidate_id": candidate_id,
+        "conflicting_observation_keys": list(conflict_keys),
+        "freshness_statuses": freshness,
+        "rows": rows,
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    ).hexdigest()
+    return digest, f"snapshot:{digest[:32]}"
+
+
+def _supplied_snapshot_id(report: Mapping[str, Any] | None) -> str | None:
+    if not isinstance(report, Mapping) or "report_snapshot_id" not in report:
+        return None
+    value = report.get("report_snapshot_id")
+    if not isinstance(value, str) or not _SNAPSHOT_ID.fullmatch(value.strip()):
+        raise ValueError("unsafe creative brief input")
+    return value.strip()
+
+
+def _insight_observation_ids(insights: Mapping[str, Any] | None) -> list[str]:
+    if insights is None:
+        return []
+    found: list[str] = []
+
+    def walk(value: Any) -> None:
+        if isinstance(value, Mapping):
+            if "observation_id" in value:
+                observation_id = _supplied_observation_id(value)
+                if observation_id:
+                    found.append(observation_id)
+            for item in value.values():
+                walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(insights)
+    return list(dict.fromkeys(found))
+
+
+def _ref(
+    ctx: Mapping[str, Any], candidate_id: str, index: int, field: str, record: Mapping[str, Any]
+) -> dict[str, Any]:
+    return {
+        "schema": REF_SCHEMA,
+        "source": _EVIDENCE_SOURCE,
         "evidence_mode": "observed",
+        "evidence_class": "observed",
+        "report_snapshot_id": ctx["report_snapshot_id"],
+        "snapshot_digest": ctx["snapshot_digest"],
+        "snapshot_digest_authenticates_source": False,
+        "record_index": index,
+        "observed_at": _instant(record.get("observed_at")),
+        "geography": _bounded(record.get("geography")),
+        "language": _bounded(record.get("language")),
+        "field": field,
+        "freshness": ctx["freshness"],
+        "conflict_state": "none",
+        "source_reference": _bounded(record.get("source")),
+        "candidate_id": candidate_id,
+        "candidate_id_is_cross_source_identity": False,
+        "identity": _identity(record, ctx["handoff"]),
     }
 
 
 def _problems(
-    records: Sequence[Mapping[str, Any]], candidate_id: str, geography: str, language: str
+    ctx: Mapping[str, Any],
+    records: Sequence[Mapping[str, Any]],
+    candidate_id: str,
+    geography: str,
+    language: str,
 ) -> list[dict[str, Any]]:
     problems: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -210,7 +378,11 @@ def _problems(
             continue
         seen.add(key)
         problems.append(
-            {"statement": statement, "evidence_refs": [_ref(candidate_id, index, "pain_point")], "product_fact": False}
+            {
+                "statement": statement,
+                "evidence_refs": [_ref(ctx, candidate_id, index, "pain_point", record)],
+                "product_fact": False,
+            }
         )
         if len(problems) == 3:
             break
@@ -218,6 +390,7 @@ def _problems(
 
 
 def _hypotheses(
+    ctx: Mapping[str, Any],
     records: Sequence[Mapping[str, Any]],
     candidate_id: str,
     geography: str,
@@ -235,14 +408,14 @@ def _hypotheses(
         if not message or key in seen:
             continue
         seen.add(key)
-        refs = [_ref(candidate_id, index, "hook")]
+        refs = [_ref(ctx, candidate_id, index, "hook", record)]
         if _clip(record.get("pain_point")):
-            refs.append(_ref(candidate_id, index, "pain_point"))
+            refs.append(_ref(ctx, candidate_id, index, "pain_point", record))
         elif primary is not None:
-            refs.append(_ref(candidate_id, primary, "pain_point"))
+            refs.append(_ref(ctx, candidate_id, primary, "pain_point", records[primary]))
         angle = _clip(record.get("angle")) or "unspecified"
         if angle != "unspecified":
-            refs.append(_ref(candidate_id, index, "angle"))
+            refs.append(_ref(ctx, candidate_id, index, "angle", record))
         objection = _clip(record.get("objection"))
         item: dict[str, Any] = {
             "id": f"h{len(hypotheses) + 1}",
@@ -254,7 +427,7 @@ def _hypotheses(
         }
         if objection:
             item["objection"] = objection
-            item["evidence_refs"] = [*refs, _ref(candidate_id, index, "objection")]
+            item["evidence_refs"] = [*refs, _ref(ctx, candidate_id, index, "objection", record)]
         hypotheses.append(item)
         if len(hypotheses) == 3:
             break
@@ -365,6 +538,78 @@ def _pack_link(synthesis: Mapping[str, Any], attention: Mapping[str, Any] | None
     }
 
 
+_UPSTREAM_CONTRACT = {
+    "name": "product-identity-synthesis-handoff-v1",
+    "join": "by_observation_id[observation_id] where match_state is exact_match",
+    "not_sufficient": ["candidate_id", "candidate_id_hint", "title", "geography", "insight_id", "record_index"],
+    "insight_schema_gap": "AttentionInsight.to_dict does not publish observation_id",
+}
+
+
+def _evidence_lineage(
+    *,
+    ctx: Mapping[str, Any],
+    attention_row: Mapping[str, Any] | None,
+    attention: Mapping[str, Any] | None,
+    conflict_keys: Sequence[str],
+    problems: Sequence[Mapping[str, Any]],
+    hypotheses: Sequence[Mapping[str, Any]],
+    handoff: Mapping[str, Mapping[str, Any]],
+    consumer_insights: Mapping[str, Any] | None,
+    supplied_snapshot: str | None,
+) -> dict[str, Any]:
+    linked: list[dict[str, Any]] = []
+    for item in (*problems, *hypotheses):
+        for ref in item.get("evidence_refs") or []:
+            linked.append(
+                {"record_index": ref["record_index"], "field": ref["field"], "linkage": ref["identity"]["linkage"]}
+            )
+    linkages = {item["linkage"] for item in linked}
+    if linkages == {"exact_match"}:
+        linkage = "exact_match"
+    elif "exact_match" in linkages:
+        linkage = "partial_exact_match"
+    else:
+        linkage = "source_local_unlinked"
+    freshness = None
+    if attention_row is not None and "freshness_statuses" in attention_row:
+        raw = attention_row.get("freshness_statuses")
+        freshness = list(raw) if isinstance(raw, list) else None
+    lineage: dict[str, Any] = {
+        "schema": LINEAGE_SCHEMA,
+        "source": _EVIDENCE_SOURCE,
+        "report_snapshot_id": ctx["report_snapshot_id"],
+        "snapshot_digest": ctx["snapshot_digest"],
+        "snapshot_digest_authenticates_source": False,
+        "supplied_report_snapshot_id": supplied_snapshot,
+        "freshness_statuses": freshness,
+        "conflict_state": "conflicting" if conflict_keys else "none",
+        "conflicting_observation_keys": list(conflict_keys),
+        "linked_fields": linked,
+        "identity": {
+            "linkage": linkage,
+            "exact_match_count": sum(item["linkage"] == "exact_match" for item in linked),
+            "candidate_id_is_cross_source_identity": False,
+            "required_upstream_contract": None if linkage == "exact_match" else dict(_UPSTREAM_CONTRACT),
+        },
+    }
+    if consumer_insights is not None:
+        insight_ids = _insight_observation_ids(consumer_insights)
+        lineage["insight_boundary"] = {
+            "inspected": True,
+            "observation_id_present": bool(insight_ids),
+            "exact_match_count": sum(
+                isinstance(handoff.get(item), Mapping) and handoff[item].get("match_state") == "exact_match"
+                for item in insight_ids
+            ),
+            "statements_used_as_hypotheses": False,
+            "linkage": "source_local_unlinked" if not insight_ids else "unlinked_without_attention_observation_id",
+        }
+    if attention is None:
+        lineage["attention_report_present"] = False
+    return lineage
+
+
 def build_creative_experiment_brief(
     *,
     synthesis: Mapping[str, Any],
@@ -372,11 +617,21 @@ def build_creative_experiment_brief(
     target_geography: str,
     target_language: str,
     asserted_claims: Sequence[str] = (),
+    identity_handoff: Mapping[str, Any] | None = None,
+    consumer_insights: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one planning brief. Insufficient evidence is a successful safe result."""
     if not isinstance(synthesis, Mapping):
         raise ValueError("unsafe creative brief input")
-    _require_safe(synthesis, consumer_attention, target_geography, target_language, list(asserted_claims))
+    _require_safe(
+        synthesis,
+        consumer_attention,
+        target_geography,
+        target_language,
+        list(asserted_claims),
+        identity_handoff,
+        consumer_insights,
+    )
     geography = _norm_geo(target_geography)
     language = _norm_lang(target_language)
     reasons: list[str] = []
@@ -387,9 +642,8 @@ def build_creative_experiment_brief(
     candidate_id = _candidate_id(synthesis)
     if not candidate_id:
         reasons.append("missing_candidate")
-    attention_row = _attention_candidate(
-        consumer_attention if isinstance(consumer_attention, Mapping) else None, candidate_id
-    )
+    attention = consumer_attention if isinstance(consumer_attention, Mapping) else None
+    attention_row = _attention_candidate(attention, candidate_id)
     records = _records(attention_row)
     conflict_keys: list[str] = []
     if attention_row is None:
@@ -423,12 +677,28 @@ def build_creative_experiment_brief(
     market_blocked = any(
         item in reasons for item in ("region_mismatch", "language_mismatch", "attention_market_unobserved")
     )
+    digest, snapshot_id = _snapshot(candidate_id, records, attention_row, conflict_keys)
+    supplied_snapshot = _supplied_snapshot_id(attention)
+    handoff = _handoff_index(identity_handoff)
+    freshness_label = (
+        "fresh"
+        if attention_row is not None
+        and "freshness_statuses" in attention_row
+        and _freshness_block(attention_row) is None
+        else "not_supplied"
+    )
+    ctx = {
+        "report_snapshot_id": snapshot_id,
+        "snapshot_digest": digest,
+        "freshness": freshness_label,
+        "handoff": handoff,
+    }
     problems = (
         []
         if blocked or market_blocked or not geography or not language
-        else _problems(records, candidate_id, geography, language)
+        else _problems(ctx, records, candidate_id, geography, language)
     )
-    hypotheses = [] if not problems else _hypotheses(records, candidate_id, geography, language, problems)
+    hypotheses = [] if not problems else _hypotheses(ctx, records, candidate_id, geography, language, problems)
     if not blocked and not market_blocked and attention_row is not None and records and not problems:
         reasons.append("missing_observed_attention")
     if problems and not hypotheses:
@@ -488,6 +758,17 @@ def build_creative_experiment_brief(
             "reason": "missing_candidate",
         }
     )
+    lineage = _evidence_lineage(
+        ctx=ctx,
+        attention_row=attention_row,
+        attention=attention,
+        conflict_keys=conflict_keys,
+        problems=problems,
+        hypotheses=hypotheses,
+        handoff=handoff,
+        consumer_insights=consumer_insights,
+        supplied_snapshot=supplied_snapshot,
+    )
     document = {
         "schema": SCHEMA,
         "outcome": outcome,
@@ -496,6 +777,7 @@ def build_creative_experiment_brief(
         "customer_problem": problems[0] if problems else None,
         "alternate_problems": problems[1:],
         "hypotheses": hypotheses,
+        "evidence_lineage": lineage,
         "audience_market": {
             "target_geography": geography or None,
             "target_language": language or None,

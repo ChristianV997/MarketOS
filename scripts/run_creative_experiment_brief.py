@@ -37,16 +37,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--geography", required=True)
     parser.add_argument("--language", required=True)
     parser.add_argument("--asserted-claim", action="append", default=[])
+    parser.add_argument("--identity-handoff")
     args = parser.parse_args(argv)
     try:
         synthesis = _read(args.synthesis, label="synthesis")
         attention = _read(args.attention, label="attention")
+        handoff = _read(args.identity_handoff, label="handoff") if args.identity_handoff else None
         document = build_creative_experiment_brief(
             synthesis=synthesis,
             consumer_attention=attention,
             target_geography=args.geography,
             target_language=args.language,
             asserted_claims=args.asserted_claim,
+            identity_handoff=handoff,
         )
     except ValueError:
         print(json.dumps({"error": "malformed creative brief input"}, sort_keys=True))
