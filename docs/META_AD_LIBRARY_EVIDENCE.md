@@ -86,7 +86,7 @@ Question: can the Ad Library API provide **ordinary (non-political) commercial a
 Answer on the evidence available: **not as documented.**
 
 - The recorded primary read (2026-10-13) describes two scopes: political and social-issue ads worldwide for seven years, and ads of any type delivered in the UK or EU for one year. Mexico is in neither commercial scope. A query for `MX` can therefore return only political and social-issue ads.
-- Three of four secondary sources describe the same EU/UK limit for ordinary ads. One says commercial ads are not in the API at all.
+- Of six secondary sources returned, three describe the same EU/UK limit for ordinary ads, one says commercial ads are not in the API at all, and two do not address the scope. The sources disagree, and none of them is primary.
 - Brazil has political-delivery fields (`br_total_reach`). Those fields are political-and-issue only. They are not evidence that ordinary Brazilian commercial ads are searchable (inference from the recorded field scope).
 - Inference: a live `MX` query would return absence, not evidence about Mexican commercial advertising. The contract therefore reports `coverage.commercial_scope = not_documented_outside_political_and_issue_scope` and `coverage.zero_records_are_absence_evidence = false` on every report. The coverage table is `_DOCUMENTED_COMMERCIAL_COUNTRIES` in `evaluation/commerce/meta_ad_library_evidence.py`: the 27 EU member states and GB. Associated territories are excluded.
 - Unknown: whether Meta has changed the scope since 2026-10-13; whether ads that reach no EU or UK location are returned for other countries (the recorded parameter note says only EU delivery counts for non-political ads); and whether associated territories fall inside the EU scope.
