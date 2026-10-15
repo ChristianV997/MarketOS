@@ -30,8 +30,13 @@ versioned receipt packet -> metadata and identity gates -> sanitized pillar repo
 `live_evidence` means that the submitted receipt metadata satisfies this
 contract; it does not re-contact a provider or independently verify the source.
 The report explicitly marks `acceptance_basis` as
-`sanitized_receipt_contract_only` and `source_verified: false`. It never falls
-back to the synthetic packet.
+`sanitized_receipt_contract_only`, `validation_level` as
+`structural_receipt_contract`, and `source_verification_status` as
+`not_performed`. A successful result uses `status: structurally_accepted` and
+still sets `source_verified: false` and `authenticated_observation: false`.
+The caller's `is_live: true`, provider ID, and source reference are claims
+checked for shape and consistency only; they are not independent provenance.
+It never falls back to the synthetic packet.
 ```
 
 ## Run it
@@ -43,7 +48,10 @@ python scripts/evaluate_product_opportunity_research.py --output <path>
 python scripts/evaluate_product_opportunity_research.py --mode live_evidence --packet <sanitized-receipts.json>
 ```
 
-- Exit `0`: no unexpected failures and no hard safety invariant failed.
+- Exit `0`: the requested mode's structural checks passed. In
+  `live_evidence` mode this means `acceptance.status` is
+  `structurally_accepted`; it is not provider/source verification, live
+  validation, or commercial authorization.
 - Exit `2`: at least one expectation failed without an allowed gap, or a hard
   safety invariant failed. Hard safety failures cannot be documented away by
   `known_gaps`.

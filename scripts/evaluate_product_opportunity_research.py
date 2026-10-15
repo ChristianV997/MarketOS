@@ -342,7 +342,10 @@ def _live_blocked_report(blockers: set[str], *, packet: Mapping[str, Any] | None
             "receipt_counts": dict(counts or {pillar: 0 for pillar in PILLARS}),
             "known_gaps_waived": False,
             "acceptance_basis": "sanitized_receipt_contract_only",
+            "validation_level": "structural_receipt_contract",
+            "source_verification_status": "not_performed",
             "source_verified": False,
+            "authenticated_observation": False,
         },
         "diagnostic_outcome": None,
         "metrics": None,
@@ -413,13 +416,16 @@ def evaluate_live_packet(packet: Mapping[str, Any]) -> dict[str, Any]:
         "input_sha256": _live_fingerprint(packet),
         "acceptance": {
             "accepted": accepted,
-            "status": "accepted" if accepted else "blocked",
+            "status": "structurally_accepted" if accepted else "blocked",
             "blockers": sorted(blockers),
             "required_pillars": list(PILLARS),
             "receipt_counts": counts,
             "known_gaps_waived": False,
             "acceptance_basis": "sanitized_receipt_contract_only",
+            "validation_level": "structural_receipt_contract",
+            "source_verification_status": "not_performed",
             "source_verified": False,
+            "authenticated_observation": False,
         },
         # This remains the canonical synthesis recommendation for diagnosis only; it does not
         # authorize a launch, supplier, payment, advertising, or other external action.

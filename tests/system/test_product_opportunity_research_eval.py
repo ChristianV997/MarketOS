@@ -83,13 +83,32 @@ def test_fixture_packet_cannot_satisfy_live_evidence_mode():
 def test_valid_live_receipts_are_accepted_without_rewriting_diagnostic_recommendation():
     report = harness.evaluate_live_packet(_live_packet())
     assert report["acceptance"]["accepted"] is True
+    assert report["acceptance"]["status"] == "structurally_accepted"
     assert report["acceptance"]["receipt_counts"] == {pillar: 1 for pillar in harness.PILLARS}
     assert report["diagnostic_outcome"]["candidate_ids"] == ["candidate-live"]
     assert report["diagnostic_outcome"]["read_only"] is True
     assert report["acceptance"]["acceptance_basis"] == "sanitized_receipt_contract_only"
+    assert report["acceptance"]["validation_level"] == "structural_receipt_contract"
+    assert report["acceptance"]["source_verification_status"] == "not_performed"
     assert report["acceptance"]["source_verified"] is False
+    assert report["acceptance"]["authenticated_observation"] is False
     assert report["provider_calls"] is False
     assert report["mutated"] is False
+
+
+def test_live_claims_are_not_source_verification():
+    packet = _live_packet()
+    packet["receipts"]["marketplace"][0]["source_reference"] = "https://claimed.example/receipt/1"
+
+    report = harness.evaluate_live_packet(packet)
+
+    acceptance = report["acceptance"]
+    assert acceptance["accepted"] is True
+    assert acceptance["status"] == "structurally_accepted"
+    assert acceptance["validation_level"] == "structural_receipt_contract"
+    assert acceptance["source_verification_status"] == "not_performed"
+    assert acceptance["source_verified"] is False
+    assert acceptance["authenticated_observation"] is False
 
 
 @pytest.mark.parametrize(
