@@ -1,7 +1,8 @@
-import { test, describe, before, after } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -41,64 +42,192 @@ class Cdp {
   }
 }
 
-async function waitJson(url) {
-  for (let i = 0; i < 60; i++) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return await res.json();
-    } catch {}
-    await sleep(250);
-  }
-  throw new Error("Timeout waiting for " + url);
+function getFreePort() {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen({ host: "127.0.0.1", port: 0 }, () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        server.close();
+        reject(new Error("Unable to allocate a local test port"));
+        return;
+      }
+      server.close((error) => error ? reject(error) : resolve(address.port));
+    });
+  });
 }
 
+function childExitMessage(label, code, signal) {
+  return `${label} exited before readiness (code=${code ?? "unknown"}, signal=${signal ?? "none"})`;
+}
+
+async function waitJson(url, {
+  processHandle,
+  label = "process",
+  timeoutMs = 15_000,
+  pollMs = 250,
+} = {}) {
+  let failure;
+  const onExit = (code, signal) => { failure = childExitMessage(label, code, signal); };
+  const onError = () => { failure = `${label} failed to start`; };
+  processHandle?.once("exit", onExit);
+  processHandle?.once("error", onError);
+
+  try {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      if (failure) throw new Error(failure);
+      if (processHandle && (processHandle.exitCode !== null || processHandle.signalCode)) {
+        throw new Error(childExitMessage(label, processHandle.exitCode, processHandle.signalCode));
+      }
+
+      try {
+        const res = await fetch(url);
+        if (res.ok) return await res.json();
+      } catch {}
+
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await sleep(Math.min(pollMs, remaining));
+    }
+
+    if (failure) throw new Error(failure);
+    throw new Error(`Timeout waiting for ${label} at ${url}`);
+  } finally {
+    processHandle?.off("exit", onExit);
+    processHandle?.off("error", onError);
+  }
+}
+
+async function stopProcess(child) {
+  if (!child || child.exitCode !== null || child.signalCode) return;
+
+  await new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.off("exit", finish);
+      child.off("error", finish);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch {}
+      finish();
+    }, 3_000);
+
+    child.once("exit", finish);
+    child.once("error", finish);
+    try {
+      if (process.platform === "win32") {
+        const killer = spawn("taskkill", ["/pid", child.pid.toString(), "/f", "/t"], { stdio: "ignore" });
+        killer.once("exit", (code) => {
+          if (code !== 0) {
+            try { child.kill(); } catch {}
+          }
+        });
+        killer.once("error", () => { try { child.kill(); } catch {} });
+      } else {
+        child.kill("SIGKILL");
+      }
+    } catch {
+      finish();
+    }
+  });
+}
+
+test("readiness reports an early child exit instead of waiting for the full timeout", async () => {
+  const child = spawn(process.execPath, ["-e", "process.exit(17)"], { stdio: "ignore" });
+  await assert.rejects(
+    waitJson("http://127.0.0.1:1/json/version", {
+      processHandle: child,
+      label: "Chrome",
+      timeoutMs: 1_000,
+      pollMs: 10,
+    }),
+    /Chrome exited before readiness/,
+  );
+  await stopProcess(child);
+});
+
+test("readiness timeout is bounded and names the waiting service", async () => {
+  const port = await getFreePort();
+  const started = Date.now();
+  await assert.rejects(
+    waitJson(`http://127.0.0.1:${port}/json/version`, { label: "Chrome", timeoutMs: 100, pollMs: 10 }),
+    /Timeout waiting for Chrome at http:\/\/127\.0\.0\.1:/,
+  );
+  assert.ok(Date.now() - started < 1_000, "bounded readiness test must not linger");
+});
+
+test("free-port allocation does not reuse an occupied local listener", async () => {
+  const blocker = createServer();
+  await new Promise((resolve, reject) => {
+    blocker.once("error", reject);
+    blocker.listen({ host: "127.0.0.1", port: 0 }, resolve);
+  });
+  const occupiedPort = blocker.address().port;
+  try {
+    const freePort = await getFreePort();
+    assert.notEqual(freePort, occupiedPort);
+  } finally {
+    await new Promise((resolve) => blocker.close(resolve));
+  }
+});
+
+test("process cleanup waits for the child to exit", async () => {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  await new Promise((resolve, reject) => {
+    child.once("spawn", resolve);
+    child.once("error", reject);
+  });
+  await stopProcess(child);
+  assert.notEqual(child.exitCode, null, "cleanup must not return while the child is alive");
+});
+
 test("Supplier CSV Preview - Browser Interaction", { skip: !chromeBin }, async (t) => {
-  const VITE_PORT = 15000 + Math.floor(Math.random() * 1000);
-  const CDP_PORT = 9000 + Math.floor(Math.random() * 1000);
-  const CSV_PATH = join(tmpdir(), "test-catalog.csv");
-  const BAD_CSV_PATH = join(tmpdir(), "bad-catalog.csv");
-
-  // Write test CSVs
-  await writeFile(CSV_PATH, "candidate_id,supplier_title,supplier,unit_cost,shipping_cost,currency\nc-123,Test Widget,manual,12.50,5.00,USD\n");
-  await writeFile(BAD_CSV_PATH, "candidate_id,supplier_title,unit_cost\nc-999,InvalidRow,invalidcost\nc-999,DuplicateRow,1.00"); // Missing shipping, invalid cost, duplicate ID
-
   const frontendDir = existsSync(join(process.cwd(), "frontend", "package.json"))
     ? join(process.cwd(), "frontend")
     : process.cwd();
   const viteBin = join(frontendDir, "node_modules", "vite", "bin", "vite.js");
+  const tempRoot = await mkdtemp(join(tmpdir(), "marketos-supplier-csv-"));
+  const CSV_PATH = join(tempRoot, "test-catalog.csv");
+  const BAD_CSV_PATH = join(tempRoot, "bad-catalog.csv");
+  const userData = join(tempRoot, "chrome-profile");
+  let viteProcess;
+  let chromeProcess;
+  let ws;
+  let VITE_PORT;
+  let CDP_PORT;
+
+  t.after(async () => {
+    try { ws?.close(); } catch {}
+    await stopProcess(chromeProcess);
+    await stopProcess(viteProcess);
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  VITE_PORT = await getFreePort();
+  await writeFile(CSV_PATH, "candidate_id,supplier_title,supplier,unit_cost,shipping_cost,currency\nc-123,Test Widget,manual,12.50,5.00,USD\n");
+  await writeFile(BAD_CSV_PATH, "candidate_id,supplier_title,unit_cost\nc-999,InvalidRow,invalidcost\nc-999,DuplicateRow,1.00");
 
   // Start Vite dev server
-  const viteProcess = spawn(process.execPath, [viteBin, "--port", VITE_PORT.toString(), "--strictPort", "--host", "127.0.0.1"], {
+  viteProcess = spawn(process.execPath, [viteBin, "--port", VITE_PORT.toString(), "--strictPort", "--host", "127.0.0.1"], {
     cwd: frontendDir,
     stdio: "inherit"
   });
 
-  t.after(() => {
-    if (viteProcess && viteProcess.pid) {
-      try {
-        if (process.platform === "win32") {
-          spawn("taskkill", ["/pid", viteProcess.pid.toString(), "/f", "/t"], { stdio: "ignore" });
-        } else {
-          viteProcess.kill("SIGKILL");
-        }
-      } catch {}
-    }
+  // Wait for Vite to be ready; an early exit is reported immediately.
+  await waitJson(`http://127.0.0.1:${VITE_PORT}`, {
+    processHandle: viteProcess,
+    label: "Vite",
   });
 
-  // Wait for Vite to be ready
-  let viteReady = false;
-  for (let i = 0; i < 40; i++) {
-    try {
-      const r = await fetch(`http://127.0.0.1:${VITE_PORT}`);
-      if (r.ok) { viteReady = true; break; }
-    } catch {}
-    await sleep(250);
-  }
-  if (!viteReady) throw new Error("Vite did not start");
-
   // Start Chrome
-  const userData = join(tmpdir(), `cdp-test-${Date.now()}`);
-  const chromeProcess = spawn(
+  CDP_PORT = await getFreePort();
+  chromeProcess = spawn(
     chromeBin,
     [
       "--headless=new",
@@ -112,26 +241,17 @@ test("Supplier CSV Preview - Browser Interaction", { skip: !chromeBin }, async (
     { stdio: "ignore" }
   );
 
-  t.after(() => {
-    if (chromeProcess && chromeProcess.pid) {
-      try {
-        if (process.platform === "win32") {
-          spawn("taskkill", ["/pid", chromeProcess.pid.toString(), "/f", "/t"], { stdio: "ignore" });
-        } else {
-          chromeProcess.kill("SIGKILL");
-        }
-      } catch {}
-    }
+  await waitJson(`http://127.0.0.1:${CDP_PORT}/json/version`, {
+    processHandle: chromeProcess,
+    label: "Chrome DevTools",
   });
-
-  await waitJson(`http://127.0.0.1:${CDP_PORT}/json/version`);
-  const pages = await waitJson(`http://127.0.0.1:${CDP_PORT}/json/list`);
+  const pages = await waitJson(`http://127.0.0.1:${CDP_PORT}/json/list`, {
+    processHandle: chromeProcess,
+    label: "Chrome DevTools",
+  });
   const page = pages.find(p => p.type === "page") || pages[0];
 
-  const ws = new WebSocket(page.webSocketDebuggerUrl);
-  t.after(() => {
-    if (ws) ws.close();
-  });
+  ws = new WebSocket(page.webSocketDebuggerUrl);
 
   await new Promise((res, rej) => {
     ws.addEventListener("open", res);
