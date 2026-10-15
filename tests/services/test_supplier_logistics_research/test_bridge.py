@@ -249,6 +249,54 @@ def test_destination_warehouse_and_supplier_facts_remain_candidate_bound(offer_f
     assert offer.goods.supplier_evidence.evidence_ref.human_confirmed is False
 
 
+@pytest.mark.parametrize("fulfillment_method", ["not dropship", "does not support dropship", "non-dropship"])
+def test_negated_dropship_claim_stays_unknown(offer_factory, fulfillment_method):
+    from backend.adapters.research.supplier_feasibility import import_json
+    from pathlib import Path
+
+    record = import_json(Path(__file__).resolve().parents[2] / "fixtures" / "supplier_feasibility" / "cj_validation_pack_success.json", supplier="cj", source_type="cj_validation_pack_report")[0]
+    offer = build_offer_from_supplier_evidence(replace(record, fulfillment_method=fulfillment_method))
+
+    assert offer.goods is not None
+    assert offer.goods.fulfillment_mode == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("moq", "inventory_quantity", "inventory_status", "expected_blocker"),
+    [
+        (100, 10, "in_stock", "available quantity is below minimum order quantity"),
+        (1, 0, "out_of_stock", "inventory status=out_of_stock cannot satisfy a current order"),
+        (None, 10, "in_stock", "moq_availability: evidence is missing"),
+        (1, None, "in_stock", "moq_availability: evidence is missing"),
+        (1, 10, None, "moq_availability: evidence is missing"),
+    ],
+)
+def test_moq_and_stock_constraints_are_conservative(
+    offer_factory,
+    moq,
+    inventory_quantity,
+    inventory_status,
+    expected_blocker,
+):
+    from backend.adapters.research.supplier_feasibility import import_json
+    from pathlib import Path
+
+    record = import_json(Path(__file__).resolve().parents[2] / "fixtures" / "supplier_feasibility" / "cj_validation_pack_success.json", supplier="cj", source_type="cj_validation_pack_report")[0]
+    record = replace(
+        record,
+        moq=moq,
+        inventory_quantity=inventory_quantity,
+        inventory_status=inventory_status,
+    )
+    report = build_report_from_supplier_evidence(
+        record,
+        target_price=Money("50", "USD", source="operator_input", provenance="assumed", evidence_state="assumed"),
+        generated_at=GENERATED_AT,
+    )
+
+    assert any(expected_blocker in blocker for blocker in report.blockers)
+
+
 def test_missing_logistics_facts_stay_unknown_and_blocked(offer_factory):
     from backend.adapters.research.supplier_feasibility import import_json
     from pathlib import Path

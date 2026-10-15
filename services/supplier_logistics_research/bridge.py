@@ -9,6 +9,7 @@ kernel.  Missing values stay missing and source provenance is retained.
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -19,6 +20,7 @@ from evaluation.commerce.canonical import SupplierOfferIdentity
 from . import controls
 from .report import build_supplier_logistics_report
 from .schemas import (
+    AVAILABILITY_STATUSES,
     CandidateBoundSupplierIdentity,
     CustomsDutyTaxProfile,
     FieldEvidence,
@@ -137,6 +139,11 @@ def _money(record: SupplierFeasibilityEvidence, field_name: str, value: Any, cur
 
 def _fulfillment_mode(value: str) -> str:
     normalized = value.strip().lower()
+    # A negated or unsupported dropship claim is not evidence of dropship
+    # compatibility. Keep it unknown rather than treating the substring as a
+    # positive capability.
+    if "drop" in normalized and any(marker in normalized for marker in ("not", "no", "non", "without")):
+        return "unknown"
     if "drop" in normalized:
         return "dropship"
     if "fba" in normalized:
@@ -173,6 +180,13 @@ def build_offer_from_supplier_evidence(
     supplier_shipping = _money(record, "shipping_cost", record.shipping_cost, shipping_currency)
     price_evidence = _evidence(record, "unit_cost", record.unit_cost)
     shipping_evidence = _evidence(record, "shipping_cost", record.shipping_cost)
+    availability_status = str(record.inventory_status or "unknown").strip().lower()
+    availability_complete = (
+        record.moq is not None
+        and record.inventory_quantity is not None
+        and availability_status in AVAILABILITY_STATUSES
+        and availability_status != "unknown"
+    )
     logistics_value = all(
         value not in (None, "")
         for value in (record.warehouse_region, record.destination_region, record.delivery_min_days, record.delivery_max_days)
@@ -182,8 +196,8 @@ def build_offer_from_supplier_evidence(
         moq_availability=MoqAvailability(
             minimum_order_quantity=record.moq,
             available_quantity=record.inventory_quantity,
-            availability_status=record.inventory_status or "unknown",
-            evidence=_evidence(record, "moq", record.moq if record.moq is not None else record.inventory_quantity),
+            availability_status=availability_status,
+            evidence=_evidence(record, "moq", True if availability_complete else None),
         ),
         lead_time=LeadTimeWindow(
             minimum_days=record.delivery_min_days,
@@ -228,7 +242,16 @@ def build_report_from_supplier_evidence(
 ) -> SupplierLogisticsReport:
     """Build the existing deterministic report from imported evidence."""
     offer = build_offer_from_supplier_evidence(record, lane=lane)
-    return build_supplier_logistics_report(offer, generated_at=generated_at, target_price=target_price)
+    report = build_supplier_logistics_report(offer, generated_at=generated_at, target_price=target_price)
+    availability_blockers: list[str] = []
+    status = str(record.inventory_status or "unknown").strip().lower()
+    if record.moq is not None and record.inventory_quantity is not None and record.inventory_quantity < record.moq:
+        availability_blockers.append("moq_availability: available quantity is below minimum order quantity")
+    if status in {"out_of_stock", "discontinued"}:
+        availability_blockers.append(f"moq_availability: inventory status={status} cannot satisfy a current order")
+    if not availability_blockers:
+        return report
+    return replace(report, blockers=tuple(dict.fromkeys((*report.blockers, *availability_blockers))))
 
 
 __all__ = ["build_offer_from_supplier_evidence", "build_report_from_supplier_evidence"]
