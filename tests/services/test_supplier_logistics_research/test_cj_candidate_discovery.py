@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -422,3 +426,33 @@ def test_client_read_only_allowlists_v2_search_and_freight_but_rejects_orders(mo
             allow_network=True,
         )
     assert len(calls) == 2
+
+
+def test_cj_adapter_imports_without_reentering_commerce_in_fresh_process():
+    repository_root = Path(__file__).resolve().parents[3]
+    code = "; ".join(
+        (
+            "from backend.adapters.research.cj_readonly_api import CjReadOnlySupplierAdapter",
+            "assert CjReadOnlySupplierAdapter is not None",
+        )
+    )
+    allowed_environment = {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP"}
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key.upper() in allowed_environment
+    }
+    environment["PYTHONPATH"] = str(repository_root)
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repository_root,
+        env=environment,
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr

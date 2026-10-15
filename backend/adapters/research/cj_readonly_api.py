@@ -15,7 +15,6 @@ from typing import Any, Mapping
 
 from backend.adapters.research.cj_public_evidence import CJProductEvidence
 from backend.validation.suppliers import CJDropshippingClient
-from evaluation.commerce.supplier_feasibility import integer, normalize_delivery_window
 
 SOURCE = "cj_authenticated_api"
 PROVIDER = "cj"
@@ -206,6 +205,8 @@ def _country_code(row: Mapping[str, Any]) -> str:
 
 
 def _stock_quantity(row: Mapping[str, Any]) -> int | None:
+    from evaluation.commerce.supplier_feasibility import integer
+
     return integer(_value(row, "storageNum", "cjInventoryNum"))
 
 
@@ -330,6 +331,8 @@ class CjReadOnlySupplierAdapter:
         Unlike ``search``, this path never uses the default HTTP client or a
         provider credential. Its outputs are always classified as fixtures.
         """
+        from evaluation.commerce.supplier_feasibility import integer, normalize_delivery_window
+
         destination = str(destination_country_code).strip().upper()
         if not query.strip():
             return CjReadOnlyResult("invalid_query", source_type="cj_readonly_fixture", warnings=("candidate_search_terms_missing",))
