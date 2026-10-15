@@ -15,8 +15,11 @@ verifies a principal holding ``event_stream:read`` in its sole internal workspac
 (``backend.identity.http``). Every other case, including unconfigured identity
 providers, closes with 1008 and sends no envelope.
 
-Once the gate passes, ``backend.ws.stream.ws_stream`` handles replay, heartbeat and
-broker consumption.
+Once the gate passes, the server-resolved ``WorkspaceAccess`` is handed to
+``backend.ws.stream.ws_stream``. Delivery is scoped to that workspace: replay is not
+offered, and a live envelope reaches the socket only when its server-set
+``workspace_id`` equals the session's workspace. No client-supplied workspace value
+is read as authority.
 """
 from __future__ import annotations
 
@@ -35,6 +38,7 @@ from backend.identity.http import (
 )
 from backend.identity.repository import OWNER_TYPE
 from backend.identity.roles import EVENT_STREAM_READ
+from backend.identity.workspaces import WorkspaceAccess
 from backend.ws.stream import ws_stream
 
 EVENTS_PROTOCOL = "marketos.events.v1"
@@ -67,24 +71,30 @@ async def _provide(ws: WebSocket, dependency: Any) -> Any:
     return await run_in_threadpool(provider)
 
 
-async def _is_operator(ws: WebSocket) -> bool:
+async def _operator_access(ws: WebSocket) -> WorkspaceAccess | None:
+    """Return the server-resolved workspace access, or ``None`` when the connection is refused.
+
+    The access object is carried forward, not reduced to a boolean, so the stream can
+    scope replay and delivery to exactly the workspace the verified principal holds.
+    """
     offered = _offered_protocols(ws)
     token = _offered_bearer_token(offered)
     if token is None or EVENTS_PROTOCOL not in offered:
-        return False
+        return None
     try:
         verifier = await _provide(ws, get_token_verifier)
         repository = await _provide(ws, get_workspace_repository)
         principal = await run_in_threadpool(require_principal, authorization=f"Bearer {token}", verifier=verifier)
-        await run_in_threadpool(_operator_gate, principal=principal, repository=repository)
+        access = await run_in_threadpool(_operator_gate, principal=principal, repository=repository)
     except Exception as exc:
         _log.info("ws_refused reason=%s", getattr(exc, "status_code", type(exc).__name__))
-        return False
-    return True
+        return None
+    return access
 
 
 async def event_stream(ws: WebSocket) -> None:  # noqa: D401
-    if not await _is_operator(ws):
+    access = await _operator_access(ws)
+    if access is None:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION)
         return
-    await ws_stream.handle(ws, subprotocol=EVENTS_PROTOCOL)
+    await ws_stream.handle(ws, subprotocol=EVENTS_PROTOCOL, access=access)

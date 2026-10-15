@@ -35,6 +35,7 @@ REPLAY = {
 LIVE = {
     "type": "cycle.completed", "event_id": "live-1", "sequence_id": 2,
     "source": "synthetic", "ts": 2.0, "payload": {"cycle": 2},
+    "workspace_id": OWNER_ALICE,  # server-set scope; the operator's own internal workspace
 }
 
 
@@ -65,6 +66,7 @@ class RecorderBroker:
 class SyntheticEnvelope:
     def __init__(self, body: dict) -> None:
         self._text = json.dumps(body)
+        self.payload = body  # mirrors EventEnvelope.payload, which carries the server-set scope
 
     def envelope_json(self) -> str:
         return self._text
@@ -184,11 +186,10 @@ def test_storage_failure_is_refused(app, overrides, broker_and_replay):
     assert_refused(app, broker_and_replay, subprotocols=[EVENTS_PROTOCOL, "bearer.tok-operator"])
 
 
-def test_operator_receives_replay_then_live_envelope(app, wired, broker_and_replay):
+def test_operator_receives_its_workspace_live_envelope_without_replay(app, wired, broker_and_replay):
     broker, replay = broker_and_replay
     with _connect(app, subprotocols=[EVENTS_PROTOCOL, "bearer.tok-operator"]) as ws:
         assert ws.accepted_subprotocol == EVENTS_PROTOCOL
-        assert ws.receive_text() == json.dumps(REPLAY, default=str)
         assert ws.receive_text() == json.dumps(LIVE)
-    assert replay.recent_calls == 1
+    assert replay.recent_calls == 0
     assert broker.consume_calls >= 1
