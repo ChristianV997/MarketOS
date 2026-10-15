@@ -1,0 +1,139 @@
+{
+  "schema": "MarketOS.ProductOpportunityLiveEvidence.v1",
+  "mode": "live_evidence",
+  "target": {
+    "candidate_id": "candidate-live",
+    "variant_id": "variant-live",
+    "geography": "MX",
+    "language": "es-MX"
+  },
+  "receipts": {
+    "marketplace": [
+      {
+        "receipt_id": "receipt-marketplace-1",
+        "provider_id": "marketplace-source-1",
+        "source_type": "marketplace_readonly",
+        "source_reference": "receipt://marketplace/1",
+        "collected_at": "2026-10-10T12:00:00Z",
+        "freshness": "fresh",
+        "geography": "MX",
+        "language": "es-MX",
+        "candidate_id": "candidate-live",
+        "variant_id": "variant-live",
+        "evidence_class": "live",
+        "evidence_mode": "live_readonly",
+        "is_live": true,
+        "currency": "USD"
+      }
+    ],
+    "supplier": [
+      {
+        "receipt_id": "receipt-supplier-1",
+        "provider_id": "supplier-source-1",
+        "source_type": "supplier_readonly",
+        "source_reference": "receipt://supplier/1",
+        "collected_at": "2026-10-10T12:01:00Z",
+        "freshness": "fresh",
+        "geography": "MX",
+        "language": "es-MX",
+        "candidate_id": "candidate-live",
+        "variant_id": "variant-live",
+        "evidence_class": "live",
+        "evidence_mode": "live_readonly",
+        "is_live": true,
+        "currency": "USD"
+      }
+    ],
+    "consumer": [
+      {
+        "receipt_id": "receipt-consumer-1",
+        "provider_id": "attention-source-1",
+        "source_type": "consumer_attention_readonly",
+        "source_reference": "receipt://attention/1",
+        "collected_at": "2026-10-10T12:02:00Z",
+        "freshness": "fresh",
+        "geography": "MX",
+        "language": "es-MX",
+        "candidate_id": "candidate-live",
+        "variant_id": "variant-live",
+        "evidence_class": "live",
+        "evidence_mode": "live_readonly",
+        "is_live": true,
+        "currency": "not_applicable"
+      }
+    ]
+  },
+  "reports": {
+    "marketplace": {
+      "report_version": "marketplace-trends-v1",
+      "evidence_mode": "live_readonly",
+      "candidates": [
+        {
+          "candidate_id": "candidate-live",
+          "variant_id": "variant-live",
+          "query": "portable label printer",
+          "evidence": [
+            {
+              "marketplace": "marketplace-readonly",
+              "price": 29.99,
+              "currency": "USD",
+              "source_confidence": 0.78,
+              "evidence_mode": "live_readonly"
+            }
+          ]
+        }
+      ]
+    },
+    "supplier": {
+      "report_version": "supplier-feasibility-v1",
+      "evidence_mode": "live_readonly",
+      "candidates": [
+        {
+          "candidate_id": "candidate-live",
+          "variant_id": "variant-live",
+          "query": "portable label printer",
+          "offers": [
+            {
+              "supplier": "supplier-readonly",
+              "unit_cost": 8.5,
+              "shipping_cost": 3.25,
+              "estimated_landed_cost": 11.75,
+              "delivery_max_days": 12,
+              "currency": "USD",
+              "evidence_mode": "live_readonly"
+            }
+          ],
+          "score": {
+            "economics": {
+              "target_sell_price": 29.99,
+              "estimated_landed_cost": 11.75,
+              "gross_margin_percent": 0.56,
+              "profit_per_order_before_ad_spend": 11.25,
+              "break_even_cpa": 11.25,
+              "break_even_roas": 2.67,
+              "assumptions": []
+            }
+          }
+        }
+      ]
+    },
+    "consumer": {
+      "report_version": "consumer-attention-v1",
+      "evidence_mode": "live_readonly",
+      "candidates": [
+        {
+          "candidate_id": "candidate-live",
+          "variant_id": "variant-live",
+          "query": "portable label printer",
+          "freshness_statuses": ["fresh"],
+          "evidence": [
+            {
+              "platform": "consumer-readonly",
+              "evidence_mode": "live_readonly"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
