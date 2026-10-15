@@ -1,0 +1,11 @@
+[
+  {
+    "candidate_id": "raw-row",
+    "query": "should reject",
+    "platform": "tiktok",
+    "source_type": "tiktok_creative_center_snapshot",
+    "hook": "ignore",
+    "raw_payload": {"provider": "tiktok", "body": "<html><body>raw</body></html>"},
+    "view_count": "10"
+  }
+]
