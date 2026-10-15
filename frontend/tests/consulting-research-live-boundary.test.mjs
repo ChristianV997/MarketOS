@@ -156,7 +156,8 @@ test("mocked successful server MRS packet adapts without fixture live promotion"
   const adapted = adaptLiveResearchResponse(result.payload);
   assert.equal(adapted.ok, true);
   if (!adapted.ok) return;
-  assert.ok(["server", "partial", "stale"].includes(adapted.evidenceLabel));
+  assert.ok(["observed", "partial", "stale", "mixed"].includes(adapted.evidenceLabel));
+  assert.notEqual(adapted.evidenceLabel, "server");
   assert.equal(adapted.model.live_validated, false);
   assert.equal(adapted.model.launch_authorized, false);
   assert.equal(adapted.model.draft_only, true);
@@ -179,15 +180,40 @@ test("fixture availability is rejected on live transport adapter", () => {
   if (!adapted.ok) assert.equal(adapted.reason, "fixture_packet_rejected_on_live_transport");
 });
 
-test("partial and stale observations stay labeled from surface model", () => {
+test("partial and stale observations preserve every row and never invent collected", () => {
   const packet = buildSurfaceFixture();
   packet.availability = "partial";
   packet.blockers = [];
-  packet.sections[2].rows[0].fresh = false;
+  for (const section of packet.sections) {
+    for (const row of section.rows) {
+      row.evidence_class = section.section_id === "competitor" ? "observed" : "derived";
+      row.fresh = section.section_id === "competitor" ? false : true;
+      row.conflict_note = section.section_id === "demand" ? "Counts disagree." : null;
+    }
+    // second row on demand — must not be dropped
+    if (section.section_id === "demand") {
+      section.rows.push({
+        evidence_id: "demand-2",
+        title: "second demand row",
+        evidence_class: "assumed",
+        summary: "Assumed demand band.",
+        source_label: "planner",
+        captured_at: "2026-01-01",
+        fresh: true,
+        conflict_note: null,
+      });
+    }
+  }
   const model = adaptResearchSurface(packet).model;
-  const sources = observationsFromSurfaceModel(model);
+  const observed = observationsFromSurfaceModel(model);
+  assert.equal(observed.ok, true);
+  if (!observed.ok) return;
+  const sources = observed.sources;
+  assert.ok(sources.length >= 7, `expected every row, got ${sources.length}`);
+  assert.ok(sources.some((row) => row.source_id.includes("demand-2") && row.status === "partial"));
   assert.ok(sources.some((row) => row.status === "stale"));
-  assert.ok(sources.some((row) => row.source_id === "supplier" && row.status === "partial"));
+  assert.ok(sources.every((row) => row.status !== "collected" || !row.source_id.startsWith("demand:")));
+  assert.equal(sources.filter((row) => row.source_id.startsWith("demand:")).length, 2);
 });
 
 test("page source keeps demo opt-in and forbids storage or workspace rebinding", async () => {

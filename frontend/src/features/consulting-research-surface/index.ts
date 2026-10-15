@@ -20,6 +20,9 @@ export {
 export { fetchLiveResearchReport, buildLiveResearchReportUrl } from "./lib/liveResearchReportApi.ts";
 export {
   adaptLiveResearchResponse,
+  assertLiveEvidenceClasses,
+  mapRecognizedEvidenceStatus,
   observationsFromSurfaceModel,
   unwrapLiveResearchEnvelope,
 } from "./lib/adaptLiveResearchResponse.ts";
+export type { LiveResearchEvidenceLabel } from "./lib/adaptLiveResearchResponse.ts";

@@ -126,7 +126,7 @@ export function ConsultingResearchSurfacePage(props: ConsultingResearchSurfacePa
       setLiveSources(adapted.sources);
       setLiveEvidenceLabel(adapted.evidenceLabel);
       setPacket(adapted.packet);
-      setSourceLabel(`live server packet · ${adapted.evidenceLabel} · memory only`);
+      setSourceLabel(`live transport packet · ${adapted.evidenceLabel} · not source verification · memory only`);
     } catch {
       setLiveKind("error");
       setLiveReason("unexpected_failure");
