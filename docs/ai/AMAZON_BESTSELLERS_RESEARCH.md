@@ -1,6 +1,6 @@
 # Amazon Bestsellers Research Adapter
 
-Updated: 2026-10-14  
+Updated: 2026-10-15 (capability reconfirmed against Creators SearchItems SortBy)
 Module: `backend/adapters/amazon_bestsellers.py`
 
 ## Capability decision
@@ -45,10 +45,13 @@ category Best Sellers feed.
 ## Supported (explicit offline only)
 
 - `collect(..., mode="fixture")` — synthetic rows labeled
-  `source=amazon_bestsellers_mock`, `evidence_mode=fixture`, never live
-- `collect(..., mode="manual_import")` — operator-supplied rows, not live Amazon
+  `source=amazon_bestsellers_mock`, `evidence_mode=fixture`,
+  `authenticity=synthetic_or_unverified_fixture`, never live
+- `collect(..., mode="manual_import")` — operator-supplied rows labeled
+  `source=amazon_bestsellers_manual_import` (not the fixture mock id), never live Amazon
 - Injected offline transport normalization for contract tests
-  (`offline_fixture=True`); warnings state it is **not** live bestseller discovery
+  (`source=amazon_bestsellers_offline_transport`, `offline_fixture=True`);
+  warnings state it is **not** live bestseller discovery
 - Rank semantics: relative rank, **not** unit sales, profit, demand, supplier, or launch authority
 - Missing fields stay missing; explicit `rank=0` preserved; currency never invented
 

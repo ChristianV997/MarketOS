@@ -34,6 +34,8 @@ _log = logging.getLogger(__name__)
 
 SOURCE = "amazon_bestsellers"
 FIXTURE_SOURCE = "amazon_bestsellers_mock"  # research consumers filter this as synthetic
+MANUAL_SOURCE = "amazon_bestsellers_manual_import"  # explicit operator snapshot; never live
+OFFLINE_TRANSPORT_SOURCE = "amazon_bestsellers_offline_transport"
 LIVE_FLAG = "MARKETOS_AMAZON_BESTSELLERS_LIVE"
 DEMO_FLAG = "MARKETOS_AMAZON_BESTSELLERS_DEMO"
 PROVIDER_ENV = "MARKETOS_AMAZON_BESTSELLERS_PROVIDER"
@@ -61,6 +63,7 @@ CAPABILITY_DECISION = {
     "category_bestseller_discovery": "unavailable",
     "reason_code": "no_documented_category_bestseller_list_api",
     "access_date_utc": "2026-10-14",
+    "reconfirmed_access_date_utc": "2026-10-15",
     "operator_context": "multi_client_commercial_product_research_not_seller_of_record",
 }
 
@@ -156,6 +159,7 @@ def _fixture_rows(*, observed_at: str) -> list[dict[str, Any]]:
                 "observed_at": observed_at,
                 "evidence_mode": "fixture",
                 "observation_kind": "fixture_bestseller_rank",
+                "authenticity": "synthetic_or_unverified_fixture",
                 "rank_semantics": "relative_bestseller_rank_not_unit_sales",
                 "live_validated": False,
                 "network_calls": False,
@@ -326,7 +330,18 @@ def normalize_rank_record(
     availability_text = str(availability).strip() if isinstance(availability, str) and availability.strip() else None
 
     stamp = raw.get("observed_at") if isinstance(raw.get("observed_at"), str) else observed_at
-    source = FIXTURE_SOURCE if evidence_mode in {"fixture", "manual_import"} else "amazon_bestsellers_offline_transport"
+    if evidence_mode == "fixture":
+        source = FIXTURE_SOURCE
+        observation_kind = "fixture_bestseller_rank"
+        authenticity = "synthetic_or_unverified_fixture"
+    elif evidence_mode == "manual_import":
+        source = MANUAL_SOURCE
+        observation_kind = "manual_operator_snapshot_rank"
+        authenticity = "operator_supplied_unverified"
+    else:
+        source = OFFLINE_TRANSPORT_SOURCE
+        observation_kind = "offline_transport_contract_rank"
+        authenticity = "offline_injected_transport_unverified"
     score = _rank_score(rank)
     row = {
         "product": product,
@@ -343,7 +358,8 @@ def normalize_rank_record(
         "availability": availability_text,
         "observed_at": stamp or "",
         "evidence_mode": evidence_mode,
-        "observation_kind": "fixture_bestseller_rank" if evidence_mode == "fixture" else "manual_or_offline_rank",
+        "observation_kind": observation_kind,
+        "authenticity": authenticity,
         "rank_semantics": "relative_bestseller_rank_not_unit_sales",
         "live_validated": False,
         "network_calls": False,
@@ -416,6 +432,7 @@ def collect_amazon_bestseller_evidence(
             record["network_calls"] = False
             record["evidence_mode"] = "fixture"
             record["source"] = FIXTURE_SOURCE
+            record["authenticity"] = "synthetic_or_unverified_fixture"
             for forbidden in _STRIPPED_AUTHORITY_FIELDS:
                 record.pop(forbidden, None)
         return {
@@ -687,7 +704,9 @@ __all__ = [
     "FIXTURE_SOURCE",
     "LIVE_FLAG",
     "LIVE_PREREQUISITES",
+    "MANUAL_SOURCE",
     "OFFICIAL_REFERENCES",
+    "OFFLINE_TRANSPORT_SOURCE",
     "SOURCE",
     "collect_amazon_bestseller_evidence",
     "explain_amazon_bestsellers_readiness",

@@ -12,6 +12,8 @@ from backend.adapters.amazon_bestsellers import (
     DEMO_FLAG,
     FIXTURE_SOURCE,
     LIVE_FLAG,
+    MANUAL_SOURCE,
+    OFFLINE_TRANSPORT_SOURCE,
     collect_amazon_bestseller_evidence,
     explain_amazon_bestsellers_readiness,
     fetch,
@@ -93,6 +95,7 @@ def test_collect_fixture_requires_explicit_mode_and_stays_non_live():
     assert result["network_calls"] is False
     assert result["records"]
     assert all(row["source"] == FIXTURE_SOURCE for row in result["records"])
+    assert all(row["authenticity"] == "synthetic_or_unverified_fixture" for row in result["records"])
     assert all(row["live_validated"] is False for row in result["records"])
     assert all(row["rank_semantics"] == "relative_bestseller_rank_not_unit_sales" for row in result["records"])
     assert "explicit_fixture_mode_not_operational_research" in result["warnings"]
@@ -202,6 +205,8 @@ def test_offline_injected_transport_normalizes_partial_rows(monkeypatch):
     assert by_title["Portable Blender"]["rank"] == 3
     assert by_title["Portable Blender"]["price"] == 19.99
     assert by_title["Portable Blender"]["currency"] == "USD"
+    assert by_title["Portable Blender"]["source"] == OFFLINE_TRANSPORT_SOURCE
+    assert by_title["Portable Blender"]["authenticity"] == "offline_injected_transport_unverified"
     assert by_title["Missing Rank Item"]["rank"] is None
     assert by_title["Missing Rank Item"]["price"] is None
     assert by_title["Explicit Zero Rank"]["rank"] == 0
@@ -269,6 +274,20 @@ def test_manual_import_preserves_marketplace_currency_separation():
     assert ("MX", "MXN") in markets
     assert ("US", "USD") in markets
     assert all(row["live_validated"] is False for row in result["records"])
+    assert all(row["source"] == MANUAL_SOURCE for row in result["records"])
+    assert all(row["source"] != FIXTURE_SOURCE for row in result["records"])
+    assert all(row["authenticity"] == "operator_supplied_unverified" for row in result["records"])
+
+
+def test_operational_paths_never_emit_fixture_or_live_validated_rows():
+    unavailable = collect_amazon_bestseller_evidence()
+    blocked = collect_amazon_bestseller_evidence(mode="live", allow_network=True)
+    for result in (unavailable, blocked):
+        assert result["records"] == []
+        assert result["live_validated"] is False
+        assert result["status"] in {"unavailable", "blocked"}
+    assert fetch() == []
+    assert last_fetch_status()["live_validated"] is False
 
 
 def test_normalize_rejects_boolean_rank_and_keeps_missing_price():
