@@ -4,8 +4,13 @@ import json
 
 import pytest
 
-from backend.adapters.research.meta_marketing_insights import operational_read, read_supplied_fixture
-from evaluation.commerce.meta_marketing_insights import SCHEMA, account_performance_view, normalize_supplied_insights
+from backend.adapters.research.meta_marketing_insights import blocked_get_plan, operational_read, read_supplied_fixture
+from evaluation.commerce.meta_marketing_insights import (
+    SCHEMA,
+    account_performance_view,
+    build_blocked_get_plan,
+    normalize_supplied_insights,
+)
 
 CANARY = "insights-canary@example.com"
 ACCOUNT_DIGITS = "9988776655"
@@ -182,3 +187,59 @@ def test_operational_read_cannot_bypass_the_ledger_or_call_transport():
     fixture = read_supplied_fixture(_payload(_row()))
     assert fixture["evidence_mode"] == "supplied_fixture"
     assert fixture["fixture_used_as_operational_fallback"] is False
+
+
+def test_provider_errors_empty_rows_and_future_dates_do_not_invent_metrics():
+    limited = normalize_supplied_insights({"error": {"code": 100, "error_subcode": 1487534, "message": ACCOUNT_DIGITS}})
+    assert limited["status"] == "data_per_call_limit"
+    assert limited["evidence"]["normalized_fields"]["rows"] == []
+    assert ACCOUNT_DIGITS not in json.dumps(limited)
+
+    timed_out = normalize_supplied_insights({"error": {"code": 100, "error_subcode": 1504018}})
+    assert timed_out["status"] == "timeout"
+    assert timed_out["evidence"]["normalized_fields"]["rows"] == []
+
+    empty = normalize_supplied_insights({"data": []})
+    assert empty["status"] == "unavailable"
+    assert empty["evidence"]["normalized_fields"]["rows"] == []
+    assert empty["evidence"]["normalized_fields"]["combined_spend"] is None
+
+    future = normalize_supplied_insights(_payload(_row()), as_of="2026-03-15")
+    assert future["status"] == "unavailable"
+    assert future["evidence"]["normalized_fields"]["rejected_row_counts"]["not_yet_reported"] == 1
+    assert future["evidence"]["normalized_fields"]["rows"] == []
+
+
+def test_rejected_uses_and_error_documents_release_no_metrics():
+    document = normalize_supplied_insights(_payload(_row()))
+    for claimed in ("competitor_intelligence", "product_opportunity_attention", "verified_sales", "ad_launch"):
+        rejected = account_performance_view(document, claimed_use=claimed)
+        assert rejected["status"] == "claim_rejected"
+        assert rejected["rows_released"] is False
+        assert rejected["rows"] == []
+        assert rejected["market_wide"] is False
+        assert "12.50" not in json.dumps(rejected)
+
+    denied = normalize_supplied_insights({"error": {"code": 100, "error_subcode": 3191001}})
+    held = account_performance_view(denied, claimed_use="account_performance_review")
+    assert held["status"] == "evidence_not_releasable"
+    assert held["rows_released"] is False
+    assert held["opportunity_attention"] is False
+    assert held["ad_library_evidence"] is False
+
+
+def test_get_plan_is_blocked_and_contains_no_account_id():
+    plan = build_blocked_get_plan(account_scope="fixture-account-a", since="2026-04-01", until="2026-04-07")
+    assert plan["method"] == "GET"
+    assert plan["post_allowed"] is False
+    assert plan["account_id_included"] is False
+    assert plan["status"] == "blocked_by_approval_ledger"
+    assert plan["approval"]["blocked_in_current_mode"] is True
+    assert plan["attribution_window_requested"] is False
+    assert ACCOUNT_DIGITS not in json.dumps(plan)
+    assert "access_token" not in json.dumps(plan)
+
+    adapter_plan = blocked_get_plan(account_scope="fixture-account-a", since="2026-04-01", until="2026-04-07")
+    assert adapter_plan["provider_call"] is False
+    with pytest.raises(ValueError, match="unsafe insights input"):
+        build_blocked_get_plan(account_scope=ACCOUNT_DIGITS, since="2026-04-01", until="2026-04-07")

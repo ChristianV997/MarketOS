@@ -10,7 +10,11 @@ from __future__ import annotations
 from typing import Any, Callable, Mapping, Sequence
 
 from backend.research.credentials import RESEARCH_CREDENTIAL_KEYS
-from evaluation.commerce.meta_marketing_insights import approval_dependency, normalize_supplied_insights
+from evaluation.commerce.meta_marketing_insights import (
+    approval_dependency,
+    build_blocked_get_plan,
+    normalize_supplied_insights,
+)
 
 PROVIDER = "meta_marketing_insights"
 DOCUMENTED_EDGES = (
@@ -73,6 +77,11 @@ def operational_read(
     decision = explain_operational_readiness(loaded_keys=loaded_keys)
     decision["transport_called"] = False
     return decision
+
+
+def blocked_get_plan(*, account_scope: str, since: str, until: str) -> dict[str, Any]:
+    """Return a GET-only plan. No transport is called and no account id is stored."""
+    return build_blocked_get_plan(account_scope=account_scope, since=since, until=until)
 
 
 def read_supplied_fixture(payload: Mapping[str, Any] | None, **options: Any) -> dict[str, Any]:

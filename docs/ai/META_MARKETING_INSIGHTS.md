@@ -19,9 +19,13 @@ Unknown: the numeric rate quota, the maximum custom `time_range`, an IANA timezo
 
 ## Gate
 
-`provider_call` in `evaluation.companyos.approval_ledger` is `blocked_in_current_mode` with a zero budget. `RESEARCH_CREDENTIAL_KEYS` has no Meta key. A boolean approval flag is not accepted. Operational reads do not call a transport and do not fill the gap with a fixture.
+`provider_call` in `evaluation.companyos.approval_ledger` is `blocked_in_current_mode` with a zero per-run and monthly budget. `simulate_action("provider_call")` cannot execute. `RESEARCH_CREDENTIAL_KEYS` contains only `TIKTOK_ACCESS_TOKEN` and `TIKTOK_ADVERTISER_ID`. A boolean approval flag is not accepted, and no Meta key is added to the allowlist. Operational reads do not call a transport and do not fill the gap with a fixture.
 
-`account_performance_view` releases rows only for `account_performance_review`. `market_demand` and the other rejected uses get no metrics.
+`build_blocked_get_plan` describes a `GET /insights` request with the documented aggregate fields. It stores no account id, requests no attribution window, and sets `post_allowed` false. The plan stays blocked by the ledger.
+
+## Consumption
+
+`account_performance_view` releases rows only when the document is a supplied fixture, the evidence category is `ProviderRunEvidence`, the data scope is `authorized_advertiser_account_only`, and the claimed use is `account_performance_review`. `market_demand`, `competitor_intelligence`, `product_opportunity_attention`, `verified_sales`, and `ad_launch` release no metrics. Error and empty documents are not releasable. This is not an input to product-opportunity attention or the Ad Library contract.
 
 ## Rollback
 

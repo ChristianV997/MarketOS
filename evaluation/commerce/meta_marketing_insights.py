@@ -362,21 +362,35 @@ def normalize_supplied_insights(
 
 def account_performance_view(document: Mapping[str, Any], *, claimed_use: str) -> dict[str, Any]:
     """Consume account evidence without treating it as market demand."""
+    rejected = {
+        "claimed_use": claimed_use if claimed_use in _REJECTED_USES else "unsupported",
+        "data_scope": "authorized_advertiser_account_only",
+        "market_wide": False,
+        "competitor_intelligence": False,
+        "purchase_intent": False,
+        "verified_sales": False,
+        "ad_library_evidence": False,
+        "opportunity_attention": False,
+        "ad_launch_authorized": False,
+        "rows_released": False,
+        "rows": [],
+        "combined_spend": None,
+    }
     if claimed_use != _ALLOWED_USE:
-        return {
-            "status": "claim_rejected",
-            "claimed_use": claimed_use if claimed_use in _REJECTED_USES else "unsupported",
-            "data_scope": "authorized_advertiser_account_only",
-            "market_wide": False,
-            "rows_released": False,
-            "ad_launch_authorized": False,
-        }
-    fields = (
-        document.get("evidence", {}).get("normalized_fields", {})
-        if isinstance(document.get("evidence"), Mapping)
-        else {}
+        return {"status": "claim_rejected", **rejected}
+    evidence = document.get("evidence") if isinstance(document, Mapping) else None
+    fields = evidence.get("normalized_fields", {}) if isinstance(evidence, Mapping) else {}
+    releasable = (
+        isinstance(document, Mapping)
+        and document.get("status") == "supplied_fixture"
+        and isinstance(evidence, Mapping)
+        and evidence.get("evidence_category") == "ProviderRunEvidence"
+        and isinstance(fields, Mapping)
+        and fields.get("data_scope") == "authorized_advertiser_account_only"
     )
-    rows = fields.get("rows", []) if isinstance(fields, Mapping) else []
+    if not releasable:
+        return {"status": "evidence_not_releasable", **rejected, "claimed_use": _ALLOWED_USE}
+    rows = fields.get("rows", [])
     return {
         "status": "account_performance_only",
         "claimed_use": _ALLOWED_USE,
@@ -391,4 +405,37 @@ def account_performance_view(document: Mapping[str, Any], *, claimed_use: str) -
         "rows_released": True,
         "rows": rows if isinstance(rows, list) else [],
         "combined_spend": None,
+    }
+
+
+def build_blocked_get_plan(*, account_scope: str, since: str, until: str) -> dict[str, Any]:
+    """Describe a GET insights request that cannot be sent.
+
+    The plan never includes an account id, a token, or a POST body. Approval
+    Ledger still blocks provider_call, so this is not a live request.
+    """
+    if _scope_label(account_scope) is None:
+        raise ValueError("unsafe insights input")
+    start = _require_day(since)
+    stop = _require_day(until)
+    if stop < start or (stop - start).days > ADAPTER_WINDOW_DAYS:
+        raise ValueError("unsafe insights input")
+    dependency = approval_dependency()
+    return {
+        "method": "GET",
+        "edge": "/insights",
+        "graph_version_documented": DOCUMENTED_GRAPH_VERSION,
+        "account_id_included": False,
+        "account_scope_label": account_scope,
+        "since": start.isoformat(),
+        "until": stop.isoformat(),
+        "fields": ["impressions", "clicks", "spend", "date_start", "date_stop", "account_currency"],
+        "breakdowns": [],
+        "attribution_window_requested": False,
+        "post_allowed": False,
+        "status": "blocked_by_approval_ledger" if dependency["blocked_in_current_mode"] else "transport_not_wired",
+        "provider_call": False,
+        "credentials_read": False,
+        "data_scope": "authorized_advertiser_account_only",
+        "approval": dependency,
     }
