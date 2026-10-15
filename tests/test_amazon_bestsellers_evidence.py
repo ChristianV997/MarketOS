@@ -101,17 +101,26 @@ def test_collect_fixture_requires_explicit_mode_and_stays_non_live():
     assert "explicit_fixture_mode_not_operational_research" in result["warnings"]
 
 
-def test_register_with_signal_engine_does_not_surface_amazon_fixture_scores():
+def test_register_with_signal_engine_does_not_surface_amazon_fixture_scores(monkeypatch):
+    from unittest.mock import patch
+
     from core.signals import SignalEngine
 
+    monkeypatch.setenv(DEMO_FLAG, "1")
     engine = SignalEngine()
     register(engine)
     assert any(item["name"] == "amazon_bestsellers" for item in engine._sources)
-    aggregated = engine.get(force_refresh=True)
+    # Isolate amazon source; production ingress must not HTTP or emit fixtures.
+    engine._sources = [item for item in engine._sources if item["name"] == "amazon_bestsellers"]
+    with patch("requests.get", side_effect=AssertionError("network forbidden")) as request:
+        aggregated = engine.get(force_refresh=True)
+        request.assert_not_called()
     assert not any(row.get("source") == FIXTURE_SOURCE for row in aggregated)
     assert not any(row.get("source") == "amazon_bestsellers_mock" for row in aggregated)
     # All-source-empty may yield generic engine mock — distinct from Amazon observation.
-    assert all(row.get("source") != "amazon_bestsellers" for row in aggregated)
+    assert all(not str(row.get("source", "")).startswith("amazon") for row in aggregated)
+    assert last_fetch_status()["status"] == "unavailable"
+    assert last_fetch_status()["live_validated"] is False
 
 
 def test_readiness_reports_unavailable_capability():

@@ -75,20 +75,33 @@ an adjacent capability with distinct evidence meaning) still requires:
 
 A boolean `allow_network` alone is never sufficient.
 
+## Production ingress (default registered path)
+
+- `register()` wires SignalEngine to `fetch()` only.
+- `fetch()` always returns `[]`, never scrapes, never fabricates Best Sellers
+  rows, and never promotes fixtures — even when `MARKETOS_AMAZON_BESTSELLERS_DEMO=1`.
+- Fixtures require explicit `collect_amazon_bestseller_evidence(mode="fixture")`.
+- Downstream research (`AmazonBestsellersResearchAdapter`) receives an empty
+  list from `fetch()` and rejects `amazon_bestsellers_mock` if ever present.
+- Product Opportunity Synthesis must not treat empty Amazon fetch as positive
+  demand evidence. Engine all-empty `source=mock` fallback is generic, not Amazon.
+
 ## Consumer notes
 
 `AmazonBestsellersResearchAdapter` in `market_sources.py` rejects
 `amazon_bestsellers_mock`. Operational `fetch()` is empty, so Amazon fixture
-scores cannot enter SignalEngine rankings. Product Opportunity Synthesis must
-not treat empty Amazon fetch as positive demand evidence.
+scores cannot enter SignalEngine rankings.
 
-### Unowned CI dependency
+### Unowned CI dependency (Codex Agent A / PR #495)
 
 `tests/test_signal_adapters.py::test_amazon_fetch_returns_mock_when_network_unavailable`
-still expects non-empty mock rows. That file is outside this PR’s write set
-(also touched by PR #495). Integrity-correct `fetch()=[]` fails that adjacent
-test until a separate owner updates it. Do not restore fixture scores into
-`fetch()` to green CI.
+still expects non-empty mock rows. That file is outside this PR’s write set and
+is owned by PR #495 (`codex/mercadolibre-evidence-integrity-20261013`).
+
+As of head `2779fb3b7989214cafd0059674172ae111265af9`, #495 has **not** updated
+that Amazon assertion (it still asserts `len(results) > 0`). Composition of
+exact #493+#495 heads therefore still fails that one test. Codex Agent A owns
+the correction. Do not restore fixture scores into `fetch()` to green CI.
 
 ## Recommended adjacent alternative (distinct meaning)
 
