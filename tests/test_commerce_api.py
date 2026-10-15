@@ -6,36 +6,36 @@ from pathlib import Path
 import pytest
 
 
-def test_live_commerce_api_requires_explicit_confirmation():
+def test_live_commerce_cycle_is_refused_before_dispatch():
     from backend.api import commerce_cycle
 
     with patch("backend.commerce.run_commerce_cycle") as run:
         response = commerce_cycle({"dry_run": False})
 
-    assert response["launchable"] is False
-    assert "live_execution_requires_confirm_live" in response["reasons"]
+    assert response == {"launchable": False, "approval_state": "not_granted", "reasons": ["live_approval_unavailable"]}
     run.assert_not_called()
 
 
-def test_commerce_api_passes_confirmed_live_mode_to_loop():
+def test_confirm_live_flag_alone_never_reaches_the_loop():
     from backend.api import commerce_cycle
 
     report = MagicMock()
-    report.to_dict.return_value = {"cycle": "confirmed"}
+    report.to_dict.return_value = {"cycle": "must-not-run"}
     with patch("backend.commerce.run_commerce_cycle", return_value=report) as run:
-        response = commerce_cycle({"dry_run": False, "confirm_live": True})
+        response = commerce_cycle({"dry_run": False, "confirm_live": True, "approval_state": "approved"})
 
-    assert response == {"cycle": "confirmed"}
-    assert run.call_args.kwargs["dry_run"] is False
+    assert response["launchable"] is False
+    assert response["reasons"] == ["live_approval_unavailable"]
+    run.assert_not_called()
 
 
-def test_string_false_is_parsed_as_live_and_still_requires_confirmation():
+def test_string_false_is_malformed_and_never_dispatches():
     from backend.api import commerce_cycle
 
     with patch("backend.commerce.run_commerce_cycle") as run:
         response = commerce_cycle({"dry_run": "false"})
 
-    assert "live_execution_requires_confirm_live" in response["reasons"]
+    assert response == {"launchable": False, "reasons": ["invalid_dry_run_flag"]}
     run.assert_not_called()
 
 
@@ -146,10 +146,10 @@ def test_signal_metrics_endpoint_exposes_cache_telemetry():
     assert "source_failures" in result
 
 
-def test_provider_cycle_endpoint_requires_urls_and_live_confirmation():
+def test_provider_cycle_endpoint_requires_urls_and_refuses_live_before_dispatch():
     from backend.api import commerce_provider_cycle
     assert commerce_provider_cycle({})["reasons"] == ["provider_cycle_requires_1_to_20_urls"]
-    assert commerce_provider_cycle({"urls": ["https://example.com"], "dry_run": False})["reasons"] == ["live_execution_requires_confirm_live"]
+    assert commerce_provider_cycle({"urls": ["https://example.com"], "dry_run": False})["reasons"] == ["live_approval_unavailable"]
 
 
 def test_integration_webhook_deduplicates_and_publishes_to_broker(monkeypatch):
@@ -169,11 +169,11 @@ def test_integration_webhook_rejects_unsupported_or_unidentified_events():
     assert integration_webhook("medusa", {"type": "order.created"}).status_code == 400
 
 
-def test_commerce_publish_requires_explicit_live_confirmation():
+def test_commerce_publish_refuses_live_before_publishing():
     from backend.api import commerce_publish
     bundle = {"artifact_id": "bundle-api", "product_id": "p", "creative_id": "c", "primary_text": "Try it"}
     assert commerce_publish({"bundle": bundle, "dry_run": True})["published"] is True
-    assert commerce_publish({"bundle": bundle, "dry_run": False})["reasons"] == ["live_publishing_requires_confirm_live"]
+    assert commerce_publish({"bundle": bundle, "dry_run": False})["reasons"] == ["live_approval_unavailable"]
 
 
 def test_postiz_analytics_reconcile_translates_and_records_feedback(monkeypatch):
