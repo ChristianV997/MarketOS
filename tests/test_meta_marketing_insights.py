@@ -5,9 +5,11 @@ import json
 import pytest
 
 from backend.adapters.research.meta_marketing_insights import operational_read, read_supplied_fixture
-from evaluation.commerce.meta_marketing_insights import SCHEMA, normalize_supplied_insights
+from evaluation.commerce.meta_marketing_insights import SCHEMA, account_performance_view, normalize_supplied_insights
 
 CANARY = "insights-canary@example.com"
+ACCOUNT_DIGITS = "9988776655"
+CURSOR = "CURSORCANARYVALUE"
 
 
 def _row(**extra):
@@ -18,81 +20,165 @@ def _row(**extra):
         "clicks": "4",
         "spend": "12.50",
         "account_currency": "USD",
-        "account_id": "1234567890",
+        "account_id": ACCOUNT_DIGITS,
         "actions": [{"action_type": "link_click", "value": "4"}],
     }
     document.update(extra)
-    return {"data": [document]}
+    return document
 
 
-def test_supplied_fixture_keeps_aggregate_metrics_and_drops_identity():
-    document = normalize_supplied_insights(_row())
+def _payload(*rows, **extra):
+    document = {"data": list(rows), "account_scope": "fixture-account-a"}
+    document.update(extra)
+    return document
+
+
+def test_supplied_fixture_keeps_decimal_metrics_and_drops_identity():
+    document = normalize_supplied_insights(_payload(_row()), expected_account_scope="fixture-account-a")
     assert document["schema"] == SCHEMA
     assert document["status"] == "supplied_fixture"
     assert document["live_observation"] is False
     assert document["provider_call"] is False
-    assert document["credentials_read"] is False
     row = document["evidence"]["normalized_fields"]["rows"][0]
-    assert row["impressions"] == 100
-    assert row["clicks"] == 4
-    assert row["spend"] == 12.5
+    assert row["impressions"] == "100"
+    assert row["clicks"] == "4"
+    assert row["spend"] == "12.50"
     assert row["account_currency"] == "USD"
+    assert row["timezone_basis"] == "ad_account_timezone"
+    assert row["timezone_name"] is None
     assert row["account_id_stored"] is False
-    assert row["ctr_recomputed"] is False
     assert row["platform_reported_actions"][0]["independently_verified_sales"] is False
-    rendered = json.dumps(document)
-    assert "1234567890" not in rendered
     assert document["evidence"]["evidence_category"] == "ProviderRunEvidence"
     assert document["evidence"]["can_feed_reports"] is False
-    for key, value in document["authority"].items():
-        assert value is False, key
+    assert document["evidence"]["normalized_fields"]["combined_spend"] is None
+    rendered = json.dumps(document)
+    assert ACCOUNT_DIGITS not in rendered
+    for value in document["authority"].values():
+        assert value is False
 
 
-def test_ctr_is_copied_not_recomputed():
-    document = normalize_supplied_insights(_row(ctr="0.5"))
-    row = document["evidence"]["normalized_fields"]["rows"][0]
-    assert row["ctr"] == 0.5
+def test_partial_metrics_currency_and_dates_fail_closed():
+    partial = normalize_supplied_insights(_payload(_row(clicks=None, spend=None, ctr="0.5")))
+    row = partial["evidence"]["normalized_fields"]["rows"][0]
+    assert row["impressions"] == "100"
+    assert row["clicks"] is None
+    assert row["field_status"]["clicks"] == "unavailable"
+    assert row["ctr"] == "0.5"
     assert row["ctr_recomputed"] is False
 
+    comma = normalize_supplied_insights(_payload(_row(spend="12,50")))
+    assert comma["evidence"]["normalized_fields"]["rows"][0]["spend"] is None
 
-def test_demographic_breakdown_is_not_stored():
-    document = normalize_supplied_insights(_row(gender="female", age="25-34"))
+    lowered = normalize_supplied_insights(_payload(_row(account_currency="usd")))
+    assert lowered["evidence"]["normalized_fields"]["rows"][0]["account_currency"] is None
+
+    invalid = normalize_supplied_insights(_payload(_row(date_start="2026-04-31")))
+    assert invalid["status"] == "unavailable"
+    assert invalid["evidence"]["normalized_fields"]["rows"] == []
+
+    mixed = normalize_supplied_insights(_payload(_row(), _row(account_currency="MXN")))
+    assert mixed["evidence"]["normalized_fields"]["single_currency"] is False
+    assert mixed["evidence"]["normalized_fields"]["combined_spend"] is None
+
+
+def test_scope_paging_rate_limit_and_time_range():
+    wrong = normalize_supplied_insights(
+        _payload(_row(), account_scope="fixture-account-b", paging={"cursors": {"after": CURSOR}}),
+        expected_account_scope="fixture-account-a",
+    )
+    rendered = json.dumps(wrong)
+    assert wrong["status"] == "account_scope_mismatch"
+    assert wrong["evidence"]["normalized_fields"]["rows"] == []
+    assert ACCOUNT_DIGITS not in rendered
+    assert CURSOR not in rendered
+
+    with pytest.raises(ValueError, match="unsafe insights input"):
+        normalize_supplied_insights(_payload(_row()), expected_account_scope=ACCOUNT_DIGITS)
+
+    mismatch = normalize_supplied_insights(
+        _payload(_row()),
+        requested_since="2026-03-01",
+        requested_until="2026-03-07",
+    )
+    assert mismatch["status"] == "time_range_mismatch"
+    assert mismatch["evidence"]["normalized_fields"]["rows"] == []
+
+    stable = normalize_supplied_insights(_payload(_row()), as_of="2026-05-20")
+    assert (
+        stable["evidence"]["normalized_fields"]["rows"][0]["reporting_stability"]
+        == "officially_unchanged_after_28_days"
+    )
+
+    limited = normalize_supplied_insights(
+        {
+            "error": {"code": 4, "error_subcode": 1504022, "message": f"act_{ACCOUNT_DIGITS} slow down"},
+            "paging": {"next": CURSOR},
+        }
+    )
+    assert limited["status"] == "rate_limited"
+    assert ACCOUNT_DIGITS not in json.dumps(limited)
+    assert CURSOR not in json.dumps(limited)
+
+    denied = normalize_supplied_insights({"error": {"code": 100, "error_subcode": 3191001, "message": "permission"}})
+    assert denied["status"] == "permission_denied"
+    assert denied["evidence"]["normalized_fields"]["rows"] == []
+
+
+def test_market_wide_claim_is_rejected_and_account_review_is_not_demand():
+    document = normalize_supplied_insights(_payload(_row()))
+    rejected = account_performance_view(document, claimed_use="market_demand")
+    assert rejected["status"] == "claim_rejected"
+    assert rejected["market_wide"] is False
+    assert rejected["rows_released"] is False
+    assert "12.50" not in json.dumps(rejected)
+
+    review = account_performance_view(document, claimed_use="account_performance_review")
+    assert review["status"] == "account_performance_only"
+    assert review["market_wide"] is False
+    assert review["ad_library_evidence"] is False
+    assert review["opportunity_attention"] is False
+    assert review["ad_launch_authorized"] is False
+    assert review["combined_spend"] is None
+    assert review["rows"][0]["spend"] == "12.50"
+
+
+def test_demographic_and_secret_input_do_not_leak():
+    document = normalize_supplied_insights(_payload(_row(gender="female", age="25-34")))
     rendered = json.dumps(document)
     assert "female" not in rendered
     assert "25-34" not in rendered
     assert document["evidence"]["normalized_fields"]["demographic_breakdown_discarded"] is True
-
-
-def test_wide_window_and_secret_input_do_not_leak():
-    wide = normalize_supplied_insights(_row(date_start="2024-01-01", date_stop="2026-04-07"))
-    assert wide["status"] == "unavailable"
-    assert wide["evidence"]["normalized_fields"]["rows"] == []
     with pytest.raises(ValueError, match="unsafe insights input"):
         normalize_supplied_insights({"data": [{"note": CANARY}]})
     with pytest.raises(ValueError, match="unsafe insights input"):
         normalize_supplied_insights({"access_token": "abcdefghijklmnop", "data": []})
 
 
-def test_operational_read_never_calls_transport_or_uses_a_fixture():
+def test_operational_read_cannot_bypass_the_ledger_or_call_transport():
     calls = {"count": 0}
 
     def transport():
         calls["count"] += 1
-        return _row()
+        return _payload(_row())
 
-    blocked = operational_read(approval_granted=False, transport=transport)
-    assert blocked["status"] == "approval_unavailable"
+    with pytest.raises(TypeError):
+        operational_read(approval_granted=True, transport=transport)
+
+    blocked = operational_read(loaded_keys=("META_ACCESS_TOKEN",), transport=transport)
+    assert blocked["status"] == "blocked_by_approval_ledger"
+    assert blocked["approval"]["blocked_in_current_mode"] is True
+    assert blocked["approval"]["can_execute"] is False
+    assert blocked["approval"]["ad_launch_can_execute"] is False
+    assert blocked["approved_allowlist_has_meta_key"] is False
+    assert blocked["credential_values_read"] is False
     assert blocked["rows"] == []
     assert blocked["fixture_fallback"] is False
-    assert blocked["credential_values_read"] is False
+    assert blocked["transport_called"] is False
     assert calls["count"] == 0
+    rendered = json.dumps(blocked)
+    assert "META_ACCESS_TOKEN" not in rendered
+    assert ACCOUNT_DIGITS not in rendered
 
-    missing = operational_read(approval_granted=True, loaded_keys=("TIKTOK_ACCESS_TOKEN",), transport=transport)
-    assert missing["status"] == "credential_unavailable"
-    assert missing["approved_allowlist_has_meta_key"] is False
-    assert calls["count"] == 0
-    assert "TIKTOK_ACCESS_TOKEN" not in json.dumps(missing)
-
-    fixture = read_supplied_fixture(_row())
+    fixture = read_supplied_fixture(_payload(_row()))
     assert fixture["evidence_mode"] == "supplied_fixture"
     assert fixture["fixture_used_as_operational_fallback"] is False
