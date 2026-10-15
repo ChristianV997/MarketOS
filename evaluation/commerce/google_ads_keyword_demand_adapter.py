@@ -18,10 +18,11 @@ Official sources reviewed 2026-10-14 (Google Ads API primary docs only):
 - OAuth scope on the v26 GenerateKeywordIdeas RPC:
   https://www.googleapis.com/auth/adwords
 
-This module plans and parses historical search metrics only. It does not call
-Google, read credentials, store customer ids, or turn monthly searches into
-Trends relative interest, sales, purchase intent, or forecast conversions.
-Operational collection never invents fixture keywords when live data is blocked.
+This module plans and parses historical Google Search metrics only. It does not
+call Google, read credentials, store customer ids, or turn monthly searches into
+sales, observed demand, marketplace truth, Trends relative interest, purchase
+intent, or forecast conversions. Operational collection never invents fixture
+keywords when live data is blocked.
 """
 from __future__ import annotations
 
@@ -84,6 +85,15 @@ _FORBIDDEN_FALLBACK_KEYS = frozenset({
     "fixture_keywords", "manual_keywords", "fallback_keywords", "default_keywords",
     "results", "observations",
 })
+_FABRICATED_LABEL_KEYS = frozenset({
+    "currency", "currency_code", "sales", "revenue", "orders", "purchase_intent",
+    "observed_demand", "relative_interest", "trends_relative_interest",
+    "search_growth_signal", "marketplace_truth", "product_attention", "demand",
+})
+_MONTH_NUMBERS = {
+    "JANUARY": 1, "FEBRUARY": 2, "MARCH": 3, "APRIL": 4, "MAY": 5, "JUNE": 6,
+    "JULY": 7, "AUGUST": 8, "SEPTEMBER": 9, "OCTOBER": 10, "NOVEMBER": 11, "DECEMBER": 12,
+}
 
 
 class GoogleAdsKeywordDemandError(ValueError):
@@ -178,6 +188,8 @@ class KeywordDemandAuthorization:
     privacy_review_complete: bool = False
     quota_limit_acknowledged: bool = False
     cost_unknown_acknowledged: bool = False
+    keyword_research_use_permitted: bool = False
+    target_account_environment: str | None = None
 
     def blockers(self) -> tuple[str, ...]:
         blockers: list[str] = []
@@ -196,6 +208,13 @@ class KeywordDemandAuthorization:
             blockers.append("quota_limit_not_acknowledged")
         if not self.cost_unknown_acknowledged:
             blockers.append("published_cost_unknown_not_acknowledged")
+        if not self.keyword_research_use_permitted:
+            blockers.append("keyword_research_permitted_use_missing")
+        environment = str(self.target_account_environment or "").strip().lower()
+        if environment not in {"test", "production"}:
+            blockers.append("account_environment_unspecified")
+        elif environment == "production" and level == "test":
+            blockers.append("test_access_is_not_production_access")
         return tuple(blockers)
 
 
@@ -225,7 +244,12 @@ class KeywordHistoricalDemand:
     search_count_unit: str
     bid_unit: str
     currency: None
+    currency_known: bool
     metric_kind: str
+    metric_scope: str
+    evidence_claim: str
+    keyword_role: str
+    freshness: str
     observation_window: str
     year_month_range: tuple[str, str] | None
     available_for_canonical_scoring: bool
@@ -257,6 +281,7 @@ class KeywordDemandRequestPlan:
     include_average_cpc: bool
     include_adult_keywords: bool
     year_month_range: tuple[str, str] | None
+    as_of: str | None
     customer_reference_id: str
     oauth_scope: str
     developer_token_required: bool
@@ -303,6 +328,7 @@ class GoogleAdsKeywordDemandReport:
     unavailable_fields: tuple[str, ...]
     live_evidence: bool = False
     fixture_fallback: bool = False
+    evidence_lineage: str = "not_live"
 
     def to_dict(self) -> dict[str, Any]:
         payload = _clean(self)
@@ -338,11 +364,21 @@ def _validate_url(value: Any) -> str | None:
     return text
 
 
+def _ym_index(value: str) -> int:
+    return int(value[:4]) * 12 + int(value[5:7])
+
+
+def _normalized_keys(mapping: Mapping[str, Any]) -> set[str]:
+    return {str(key).lower().replace("-", "_") for key in mapping}
+
+
 def build_request_plan(request: Mapping[str, Any]) -> KeywordDemandRequestPlan:
     if not isinstance(request, Mapping) or _secret_like(request):
         raise GoogleAdsKeywordDemandError("secret-like or raw keyword request is not accepted")
     if any(key in request for key in _FORBIDDEN_FALLBACK_KEYS):
         raise GoogleAdsKeywordDemandError("fixture or manual keyword fallback is not accepted")
+    if _normalized_keys(request) & _FABRICATED_LABEL_KEYS:
+        raise GoogleAdsKeywordDemandError("fabricated metric label is not accepted")
     method = str(request.get("method") or "").strip()
     if method == "generate_keyword_forecast_metrics":
         raise GoogleAdsKeywordDemandError("forecast metrics are not historical demand")
@@ -394,6 +430,12 @@ def build_request_plan(request: Mapping[str, Any]) -> KeywordDemandRequestPlan:
         raise GoogleAdsKeywordDemandError("year_month range needs both start and end")
     if start and end and end < start:
         raise GoogleAdsKeywordDemandError("year_month range ends before it starts")
+    as_of = _year_month(request.get("as_of"))
+    if start and end and as_of is not None:
+        if _ym_index(end) > _ym_index(as_of):
+            raise GoogleAdsKeywordDemandError("year_month range is after as_of")
+        if _ym_index(as_of) - _ym_index(start) > 48:
+            raise GoogleAdsKeywordDemandError("year_month range is outside the published monthly retention")
     customer_reference = str(request.get("customer_reference_id") or "credential-google-ads-customer").strip()
     if customer_reference.isdigit() or _secret_like(customer_reference):
         raise GoogleAdsKeywordDemandError("customer reference must be a metadata id, not an account id")
@@ -418,6 +460,7 @@ def build_request_plan(request: Mapping[str, Any]) -> KeywordDemandRequestPlan:
         include_average_cpc=request.get("include_average_cpc") is True,
         include_adult_keywords=request.get("include_adult_keywords") is True,
         year_month_range=(start, end) if start and end else None,
+        as_of=as_of,
         customer_reference_id=customer_reference[:80],
         oauth_scope=OAUTH_SCOPE,
         developer_token_required=False,
@@ -431,10 +474,7 @@ def build_request_plan(request: Mapping[str, Any]) -> KeywordDemandRequestPlan:
 def _month_point(row: Mapping[str, Any]) -> MonthlySearchVolume:
     year = _optional_int(row.get("year"), name="year", minimum=2000, maximum=2100)
     month = str(row.get("month") or "").strip().upper()
-    if year is None or month not in {
-        "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE",
-        "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER",
-    }:
+    if year is None or month not in _MONTH_NUMBERS:
         raise GoogleAdsKeywordDemandError("monthly search volume needs a year and month")
     searches = _optional_int(row.get("monthly_searches"), name="monthly_searches", minimum=0)
     return MonthlySearchVolume(year, month, searches)
@@ -449,13 +489,50 @@ def _competition(value: Any) -> str | None:
     return text
 
 
+def _keyword_role(
+    keyword: str,
+    variants: tuple[str, ...],
+    requested: Sequence[str],
+    method: str,
+) -> str:
+    wanted = {" ".join(item.split()).casefold() for item in requested if str(item).strip()}
+    if not wanted:
+        return "unscoped_row"
+    canonical = " ".join(keyword.split()).casefold()
+    variant_names = {" ".join(item.split()).casefold() for item in variants}
+    if canonical in wanted:
+        return "requested_keyword"
+    if variant_names & wanted:
+        return "close_variant_of_requested_keyword"
+    if method == "generate_keyword_ideas":
+        return "idea_suggestion"
+    raise GoogleAdsKeywordDemandError("keyword is not in the request")
+
+
+def _freshness(as_of: str | None, year_month_range: tuple[str, str] | None) -> str:
+    if as_of is None:
+        return "unverified_no_reference_clock"
+    if year_month_range:
+        return "requested_window_not_a_provider_timestamp"
+    return "trailing_12_months_unverified_against_provider"
+
+
+def _reject_fabricated_labels(mapping: Mapping[str, Any]) -> None:
+    if _normalized_keys(mapping) & _FABRICATED_LABEL_KEYS:
+        raise GoogleAdsKeywordDemandError("fabricated metric label is not accepted")
+
+
 def parse_historical_result(
     row: Mapping[str, Any],
     *,
     year_month_range: tuple[str, str] | None,
+    requested_keywords: Sequence[str] = (),
+    method: str = "generate_keyword_historical_metrics",
+    as_of: str | None = None,
 ) -> KeywordHistoricalDemand:
     if _secret_like(row):
         raise GoogleAdsKeywordDemandError("secret-like keyword result is not accepted")
+    _reject_fabricated_labels(row)
     keyword = " ".join(str(row.get("text") or row.get("keyword") or "").split())
     if not keyword:
         raise GoogleAdsKeywordDemandError("keyword result text is required")
@@ -464,12 +541,19 @@ def parse_historical_result(
         metrics = {}
     if not isinstance(metrics, Mapping):
         raise GoogleAdsKeywordDemandError("keyword metrics must be an object or null")
+    _reject_fabricated_labels(metrics)
     volumes_raw = metrics.get("monthly_search_volumes") or ()
     if isinstance(volumes_raw, str) or not isinstance(volumes_raw, Sequence):
         raise GoogleAdsKeywordDemandError("monthly_search_volumes must be a list")
     volumes = tuple(_month_point(item) for item in volumes_raw if isinstance(item, Mapping))
     if len(volumes) != len(tuple(volumes_raw)):
         raise GoogleAdsKeywordDemandError("monthly search volume row was not an object")
+    if as_of is not None:
+        as_of_index = _ym_index(as_of)
+        for point in volumes:
+            point_index = point.year * 12 + _MONTH_NUMBERS[point.month]
+            if point_index > as_of_index or as_of_index - point_index > 48:
+                raise GoogleAdsKeywordDemandError("monthly search point is outside the published retention window")
     if year_month_range:
         window = f"{year_month_range[0]}/{year_month_range[1]}"
     elif volumes:
@@ -487,28 +571,39 @@ def parse_historical_result(
             for item in variants_raw
             if str(item).strip()
         )[:5]
+    avg_monthly_searches = _optional_int(
+        metrics.get("avg_monthly_searches"), name="avg_monthly_searches", minimum=0,
+    )
+    low_bid = _optional_int(
+        metrics.get("low_top_of_page_bid_micros"), name="low_top_of_page_bid_micros", minimum=0,
+    )
+    high_bid = _optional_int(
+        metrics.get("high_top_of_page_bid_micros"), name="high_top_of_page_bid_micros", minimum=0,
+    )
+    average_cpc = _optional_int(metrics.get("average_cpc_micros"), name="average_cpc_micros", minimum=0)
+    has_count = avg_monthly_searches is not None or any(point.monthly_searches is not None for point in volumes)
+    has_bid = any(value is not None for value in (low_bid, high_bid, average_cpc))
     return KeywordHistoricalDemand(
         keyword=keyword[:80],
         close_variants=variants,
-        avg_monthly_searches=_optional_int(metrics.get("avg_monthly_searches"), name="avg_monthly_searches", minimum=0),
+        avg_monthly_searches=avg_monthly_searches,
         monthly_search_volumes=volumes,
         competition=_competition(metrics.get("competition")),
         competition_index=_optional_int(
             metrics.get("competition_index"), name="competition_index", minimum=0, maximum=100,
         ),
-        low_top_of_page_bid_micros=_optional_int(
-            metrics.get("low_top_of_page_bid_micros"), name="low_top_of_page_bid_micros", minimum=0,
-        ),
-        high_top_of_page_bid_micros=_optional_int(
-            metrics.get("high_top_of_page_bid_micros"), name="high_top_of_page_bid_micros", minimum=0,
-        ),
-        average_cpc_micros=_optional_int(
-            metrics.get("average_cpc_micros"), name="average_cpc_micros", minimum=0,
-        ),
-        search_count_unit="approximate_monthly_searches",
-        bid_unit="micros",
+        low_top_of_page_bid_micros=low_bid,
+        high_top_of_page_bid_micros=high_bid,
+        average_cpc_micros=average_cpc,
+        search_count_unit="approximate_monthly_searches" if has_count else "unavailable",
+        bid_unit="micros" if has_bid else "unavailable",
         currency=None,
-        metric_kind="historical_search_demand",
+        currency_known=False,
+        metric_kind="approximate_historical_search_metric",
+        metric_scope="keyword_planner_historical_search",
+        evidence_claim="approximate_google_search_history_not_sales_or_marketplace_truth",
+        keyword_role=_keyword_role(keyword, variants, requested_keywords, method),
+        freshness=_freshness(as_of, year_month_range),
         observation_window=window,
         year_month_range=year_month_range,
         available_for_canonical_scoring=False,
@@ -520,13 +615,50 @@ def parse_historical_result(
     )
 
 
+def _declared_target_mismatch(
+    payload: Mapping[str, Any],
+    *,
+    geo_target_constants: Sequence[str],
+    all_locations: bool,
+    language_constant: str | None,
+    language_unspecified: bool,
+) -> bool:
+    if "geo_target_constants" in payload:
+        declared = payload.get("geo_target_constants")
+        if isinstance(declared, str) or not isinstance(declared, Sequence):
+            return True
+        declared_geos = tuple(str(item) for item in declared)
+        if all_locations or declared_geos != tuple(geo_target_constants):
+            return True
+    declared_language = payload.get("language", payload.get("language_constant"))
+    if declared_language not in (None, ""):
+        if language_unspecified or str(declared_language) != (language_constant or ""):
+            return True
+    return False
+
+
 def parse_keyword_demand_page(
     payload: Mapping[str, Any],
     *,
     year_month_range: tuple[str, str] | None,
+    requested_keywords: Sequence[str] = (),
+    method: str = "generate_keyword_historical_metrics",
+    as_of: str | None = None,
+    geo_target_constants: Sequence[str] = (),
+    all_locations: bool = False,
+    language_constant: str | None = None,
+    language_unspecified: bool = False,
 ) -> tuple[tuple[KeywordHistoricalDemand, ...], str | None, tuple[str, ...]]:
     if not isinstance(payload, Mapping) or _secret_like(payload):
         raise GoogleAdsKeywordDemandError("secret-like or raw keyword page is not accepted")
+    if _declared_target_mismatch(
+        payload,
+        geo_target_constants=geo_target_constants,
+        all_locations=all_locations,
+        language_constant=language_constant,
+        language_unspecified=language_unspecified,
+    ):
+        return (), None, ("targeting_mismatch",)
     rows = payload.get("results")
     if rows is None:
         rows = ()
@@ -539,7 +671,13 @@ def parse_keyword_demand_page(
             warnings.append(f"result_{index}_ignored_non_mapping")
             continue
         try:
-            observations.append(parse_historical_result(row, year_month_range=year_month_range))
+            observations.append(parse_historical_result(
+                row,
+                year_month_range=year_month_range,
+                requested_keywords=requested_keywords,
+                method=method,
+                as_of=as_of,
+            ))
         except GoogleAdsKeywordDemandError as exc:
             warnings.append(f"result_{index}_{exc}")
     token = payload.get("next_page_token")
@@ -577,11 +715,16 @@ def attention_projection(
     for item in observations:
         rows.append({
             "keyword": item.keyword,
+            "keyword_role": item.keyword_role,
             "candidate_id": links.get(item.keyword),
             "avg_monthly_searches": item.avg_monthly_searches,
             "search_count_unit": item.search_count_unit,
             "competition_index": item.competition_index,
             "observation_window": item.observation_window,
+            "freshness": item.freshness,
+            "currency": None,
+            "currency_known": False,
+            "evidence_claim": item.evidence_claim,
             "search_growth_signal": None,
             "available_for_canonical_scoring": False,
         })
@@ -687,7 +830,17 @@ class FakeGoogleAdsKeywordTransport:
                 truncated = True
                 warnings.append("stopped_after_provider_error")
                 break
-            parsed, token, page_warnings = parse_keyword_demand_page(page, year_month_range=plan.year_month_range)
+            parsed, token, page_warnings = parse_keyword_demand_page(
+                page,
+                year_month_range=plan.year_month_range,
+                requested_keywords=plan.keywords,
+                method=plan.method,
+                as_of=plan.as_of,
+                geo_target_constants=plan.geo_target_constants,
+                all_locations=plan.all_locations,
+                language_constant=plan.language_constant,
+                language_unspecified=plan.language_unspecified,
+            )
             observations.extend(parsed[: plan.page_size])
             if len(parsed) > plan.page_size:
                 warnings.append("adapter_page_size_cap_applied")
@@ -775,19 +928,41 @@ def collect_google_ads_keyword_demand(
     if result.network_calls or result.credentials_loaded:
         raise GoogleAdsKeywordDemandError("transport must not load credentials or mark a network call from this module")
     observations = result.observations
-    projection = attention_projection(observations, identity_links)
     warnings = result.warnings
     if isinstance(active, FakeGoogleAdsKeywordTransport):
+        status = {
+            "collected": "synthetic_not_live",
+            "incomplete": "synthetic_incomplete",
+            "unavailable": "synthetic_unavailable",
+        }.get(result.status, result.status)
+        lineage = "synthetic_test_transport"
         warnings = tuple(dict.fromkeys((*warnings, "synthetic_test_transport_not_live_evidence")))
+    elif result.observations or result.status in {"collected", "live", "live_collected"}:
+        return _blocked(
+            "rejected_non_live_promotion",
+            ("non_live_transport_cannot_promote_observations",),
+            generated_at=generated_at,
+            plan=plan,
+            warnings=("fixture_to_live_promotion_rejected",),
+        )
+    else:
+        status = result.status
+        lineage = (
+            "live_transport_not_implemented"
+            if status == "blocked_live_transport_not_implemented"
+            else "not_live"
+        )
+        observations = ()
+    projection = attention_projection(observations, identity_links)
     return GoogleAdsKeywordDemandReport(
         report_version="google-ads-keyword-demand-v1",
         generated_at=generated_at,
         provider_id=PROVIDER_ID,
         evidence_category=EVIDENCE_CATEGORY,
-        result_status=result.status,
+        result_status=status,
         request_plan=plan,
         observations=observations,
-        blockers=() if result.status == "collected" else (result.status,),
+        blockers=() if status == "collected" else (status,),
         warnings=warnings,
         attention_projection=projection,
         read_only=True,
@@ -796,6 +971,7 @@ def collect_google_ads_keyword_demand(
         mutated=False,
         live_transport_implemented=False,
         unavailable_fields=UNAVAILABLE_FIELDS,
+        evidence_lineage=lineage,
     )
 
 

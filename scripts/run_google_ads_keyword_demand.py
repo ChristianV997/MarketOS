@@ -50,6 +50,8 @@ def _authorization(payload: dict[str, Any]) -> KeywordDemandAuthorization:
         "privacy_review_complete",
         "quota_limit_acknowledged",
         "cost_unknown_acknowledged",
+        "keyword_research_use_permitted",
+        "target_account_environment",
     }
     if any(key not in allowed for key in raw):
         raise ValueError("authorization contains an unsupported field")
@@ -62,6 +64,12 @@ def _authorization(payload: dict[str, Any]) -> KeywordDemandAuthorization:
         privacy_review_complete=raw.get("privacy_review_complete") is True,
         quota_limit_acknowledged=raw.get("quota_limit_acknowledged") is True,
         cost_unknown_acknowledged=raw.get("cost_unknown_acknowledged") is True,
+        keyword_research_use_permitted=raw.get("keyword_research_use_permitted") is True,
+        target_account_environment=(
+            None
+            if raw.get("target_account_environment") in (None, "")
+            else str(raw.get("target_account_environment"))
+        ),
     )
 
 

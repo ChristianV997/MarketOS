@@ -1,8 +1,27 @@
-# Google Ads keyword demand (read-only)
+# Google Ads keyword metrics (read-only)
 
-Access date for the primary pages below: **2026-10-14**.
+Access date for the re-check below: **2026-10-15**. Pages that still show "Last updated 2026-10-14 UTC" are cited as that page date.
 
-This adapter plans and parses **historical keyword demand** from Google Ads Keyword Planner. It is not the Google Trends adapter, not relative interest, and not the DataForSEO `keyword_demand_snapshot`. It does not create campaigns, forecasts, or ad groups, and it does not spend.
+This adapter plans and parses **approximate historical Google Search metrics** from Keyword Planner. It is not the Google Trends adapter, not relative interest, and not the DataForSEO `keyword_demand_snapshot`. Counts are not sales, observed product demand, product attention, or marketplace truth. The module does not create campaigns, forecasts, or ad groups, and it does not spend.
+
+## Mexico live-read decision: NO-GO
+
+No authorized Google Ads request has been made from this repo, and the live socket is not implemented. A synthetic or fixture transport cannot validate a Mexico read. Do not describe any current output as live Mexico demand.
+
+A later live read would still have to clear every item below. Missing any one keeps the report blocked with zero observations:
+
+1. Approval Ledger `provider_call` is `approved`.
+2. Credential broker has the OAuth material. This JSON only carries `credential_reference_present: true` and a non-numeric `customer_reference_id`.
+3. Cloud project access is Explorer, Basic, or Standard, and `target_account_environment` is `production`. Test access can call test accounts only and is not a production Mexico read. Test accounts do not serve live ads.
+4. `keyword_research_use_permitted` is true. Basic and Standard permissible use is what allows keyword research; access level alone does not.
+5. Terms and privacy reviews cover aggregate keyword metrics only.
+6. Quota and unknown-cost acknowledgements are set. No per-request price was published on the pages reviewed.
+7. Geography is an explicit `geoTargetConstants/{id}` for Mexico, copied from the official geo-target table by the operator. This repo did not find a Mexico criterion id on the pages fetched on 2026-10-15, so it does not hardcode one. `languageConstants/1003` is the published Spanish (`es`) constant and is not applied unless the request sets it. English in the official sample is `languageConstants/1000` and is not a default.
+8. Network is explicit. The v26 historical-metrics request says that if network is omitted, Google Search and Partners is used. This adapter does not rely on that default.
+9. `as_of` is the operator's reference month. Without it, freshness stays `unverified_no_reference_clock`. A window more than 48 months before `as_of`, or a window after `as_of`, is rejected. Forty-eight months is this adapter's reading of "up to the past 4 years," not a Google-published day count.
+10. The call is direct or through a manager. The ideas sample sends `login-customer-id`. This module does not accept that id. Whether a non-manager account may omit it was not settled on the pages reviewed.
+
+`DisabledLiveTransport` still returns `blocked_live_transport_not_implemented` after every gate is true.
 
 The operational command is [scripts/run_google_ads_keyword_demand.py](../scripts/run_google_ads_keyword_demand.py). It has no `--fixture` flag and does not read environment variables. If approval, credentials, or the live transport are missing, the report is `blocked` or `unavailable` with **zero observations**. It does not invent keywords.
 
@@ -36,19 +55,29 @@ Example request (metadata only):
     "terms_review_complete": true,
     "privacy_review_complete": true,
     "quota_limit_acknowledged": true,
-    "cost_unknown_acknowledged": true
+    "cost_unknown_acknowledged": true,
+    "keyword_research_use_permitted": true,
+    "target_account_environment": "production"
   }
 }
 ```
 
-`geoTargetConstants/1000001` and `languageConstants/1003` in that example are placeholders for ids the operator looks up. They are not a default.
+`geoTargetConstants/1000001` is a placeholder, not a Mexico id. `languageConstants/1003` is the published Spanish constant and is still not a default.
 
-Exit 0 means a report file was produced. Read `result_status`. It does not mean Google returned demand.
+Exit 0 means a report file was produced. Read `result_status`. `synthetic_not_live` is a test double, not a live validation. `collected` is not a status this module emits.
 
 ## Verified from primary docs
 
-- Keyword planning overview: planning services allow fewer requests per minute than other services; cache results because they do not change frequently; historical metrics refresh monthly. Forecasts are a different operation and are out of scope here.
+- Keyword planning overview, last updated 2026-10-14 UTC: cache results because responses for a given keyword set stay consistent over hours or days, and historical search volume refreshes monthly. Forecasts are a different operation.
   https://developers.google.com/google-ads/api/docs/keyword-planning/overview
+- Historical metrics, last updated 2026-10-14 UTC: past Google Search performance, not a forecast. `avg_monthly_searches` is the past 12 months or `year_month_range`. `monthly_search_volumes` is approximate and available for up to the past 4 years. `competition_index` is 0–100. Bid fields are 20th and 80th percentile `*_micros`. `average_cpc_micros` only when requested. The sample uses geo `2840` for the USA and language `1000` for English; those are sample constants, not this adapter's defaults. A missing count stays null.
+  https://developers.google.com/google-ads/api/docs/keyword-planning/generate-historical-metrics
+- v26 `GenerateKeywordHistoricalMetricsRequest`, last updated 2026-10-13 UTC: up to 10 geos; an empty list may mean all geos; omitted network means Google Search and Partners; omitted language includes keywords across languages; near-exact duplicates may be collapsed (`car` / `cars`); maximum 10,000 keywords. `customer_id` is "the ID of the customer with the recommendation." No `currency_code` field is on this request message's historical metrics.
+  https://developers.google.com/google-ads/api/reference/rpc/v26/GenerateKeywordHistoricalMetricsRequest
+- Access levels, last updated 2026-10-14 UTC: Test is test accounts only, 15,000 operations/day. Explorer is test and production, 2,880 production operations/day. Basic is 15,000 for both. Standard is unlimited for both. The page summary says three levels; the table lists four, including Explorer. Permissible use, for Basic and Standard, controls features such as keyword research.
+  https://developers.google.com/google-ads/api/docs/api-policy/access-levels
+- Language constants, codes and formats page, last updated 2026-10-14 UTC: Spanish `es` is criterion id 1003.
+  https://developers.google.com/google-ads/api/data/codes-formats
 - `GenerateKeywordIdeas`: `KeywordSeed` is 1–20 keywords; `KeywordAndUrlSeed` is 1–20 plus a URL; `SiteSeed` can yield up to 250,000 ideas (this adapter rejects site seed). Locations: up to 10 geo target constants, or an empty list for all locations. Language resource form: `languageConstants/{criterion_id}`. Pagination: up to 10,000 results per page; follow `next_page_token`. Sample REST call: `POST https://googleads.googleapis.com/v${API_VERSION}/customers/${CUSTOMER_ID}:generateKeywordIdeas` with `Authorization: Bearer` and `login-customer-id`.
   https://developers.google.com/google-ads/api/docs/keyword-planning/generate-keyword-ideas
 - `GenerateKeywordHistoricalMetrics`: up to 10,000 keywords and up to 10 geos. Fields used here: `avg_monthly_searches` (trailing 12 months or `year_month_range`), `monthly_search_volumes`, `competition`, `competition_index` 0–100, `low_top_of_page_bid_micros` (20th percentile), `high_top_of_page_bid_micros` (80th percentile), and `average_cpc_micros` only when `include_average_cpc` is requested. A missing count stays null. The Java sample prints null when the count is absent.
