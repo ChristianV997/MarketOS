@@ -103,6 +103,10 @@ def test_research_tools_never_represented_as_commercially_available():
         assert blocker in data["blockers"]
     faq = next(item for item in official_citations() if "faq" in item["url"])
     assert faq["access_date"] == ACCESS_DATE
+    ccl = next(item for item in research_tool_capabilities() if item.surface == "commercial_content_api")
+    assert "do_not_assume_identical_research_api_eligibility_rule" in ccl.notes
+    assert "supported_countries_eu_eea_uk_ch_mexico_not_listed" in ccl.notes
+    assert "mexico_commercial_product_attention_has_no_eligible_live_source" in data["blockers"]
 
 
 def test_fixture_and_fake_never_become_observed_or_live():

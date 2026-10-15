@@ -1,10 +1,12 @@
 """backend.adapters.research.tiktok_research_evidence — thin offline bridge.
 
 Delegates to ``evaluation.commerce.tiktok_research_evidence``. No live TikTok
-transport, credentials, scraping, or second organic adapter. Official Research
-Tools remain blocked for MarketOS commercial use; Creative Center website
-visibility is not scrape permission; Marketing API own-account metrics are not
-market-wide attention evidence.
+transport, credentials, scraping, or second organic adapter. Research Tools FAQ
+blocks commercial users for Research Tools; Commercial Content API is evaluated
+separately (EU-phase ad geography; Mexico not listed) and must not be assumed to
+share the Research API eligibility rule without primary evidence. Creative Center
+website visibility is not scrape permission; Marketing API own-account metrics
+are not market-wide attention evidence.
 
 Ordinary runtime returns a precise blocked/unavailable capability with zero
 evidence rows. Fixture/fake offline demos require explicit

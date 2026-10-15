@@ -4,37 +4,42 @@ Default-off capability contract for TikTok consumer-attention / creative
 evidence. It does **not** call TikTok, load credentials, scrape Creative
 Center, or authorize ads, spend, messaging, or publishing.
 
-**Operational result under current official terms:** MarketOS has **no eligible
-official live source** for commercial product/competitor attention research on
-TikTok. Ordinary runtime returns zero evidence rows with a precise blocked
-status. Offline fixtures/fakes are test/demo only (`allow_offline_demo`).
+**Operational result for MarketOS Mexico commercial product-attention research:**
+there is **no eligible official live source** under current primary docs.
+Ordinary runtime returns zero evidence rows with a precise blocked status.
+That is a **source-capability boundary**, not a claim that MarketOS itself must
+be offline. Offline fixtures/fakes are test/demo only (`allow_offline_demo`).
 
-Primary documentation rechecked: **2026-10-14**.
+Primary documentation rechecked: **2026-10-15**.
 
-## Source-by-source eligibility
+## Source-by-source capability matrix
 
-| Surface | Documented role | Auth / geography / quotas | MarketOS commercial attention use |
-| --- | --- | --- | --- |
-| Research API | Query public videos/accounts under Research Tools | Approved research project + research client; regional eligibility for researchers; approved-project quotas (e.g. 1000 req/day, up to 100k records/day) | **Not eligible.** FAQ: creators, advertisers, commercial users → **No.** Academic eligibility ≠ MarketOS commercial authorization |
-| Commercial Content API | Query public ad-library-style data under Research Tools | Same Research Tools approval/client model | **Not eligible** under the same FAQ (Research Tools) |
-| Creative Center | Public website for trends/ad inspiration; login optional for more features; Symphony API is creative production | Website access ≠ API ingest contract | **No supported MarketOS ingest.** Visibility is **not** scrape permission |
-| Marketing API (TikTok for Business) | Advertiser-account campaign creation/reporting | Advertiser credentials; own-account analytics | **Not market-wide attention evidence.** Own-account performance must not be labeled competitor/demand proof; mutation-adjacent and out of this layer’s scope |
+| Surface | Eligible user / use (documented) | Geography / date coverage | API vs product distinction | Access requirements | Available fields (high level) | Known unknowns | MarketOS MX commercial product-attention |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Research API (Research Tools) | Independent academic / non-commercial researchers; FAQ: creator/advertiser/**commercial user → No** | Applicant regions on products page: U.S., Europe, Canada, Brazil (Mexico **not** listed). Video `region_code` enum includes `MX` as creator registration country—not applicant eligibility | Research Tools query API for public videos/accounts; separate from CCL, Creative Center, Marketing API | Approved research project + research client; Research Tools ToS; quotas (e.g. 1000 req/day, up to 100k records/day for approved research) | Public account/content fields per codebook / Query Videos | Exact Mexico researcher-expansion timing; whether any non-FAQ commercial path exists (none documented) | **Blocked / unavailable.** Commercial FAQ No; applicant regions exclude Mexico; no live transport |
+| Commercial Content API | Products page: “public and researchers”; requester may be in any country while data phase is EU-only. **Do not assume** the Research API academic eligibility rule applies verbatim—no dedicated CCL eligibility FAQ found (doc URL 404) | Supported Countries: EU, EEA, UK, CH. Products page: EU ads “to begin with.” **Mexico not listed** | Ad-library / Commercial Content Library APIs under Research & Insights; distinct product from Research API video query | Application + approved client key; Getting Started uses research client + OAuth client token | Ads, advertiser metadata, targeting, reach-style fields (Query Ads / Advertisers / reports) | Whether CCL has a commercial-use exception separate from Research Tools FAQ; future non-EU expansion timeline | **Unavailable for MX attention.** Even setting eligibility aside, documented ad geography excludes Mexico; no live transport |
+| Creative Center | Public website; login optional for more features | Website visibility; not an ingest geography contract | Inspiration / Top Ads / Trends **website**; Symphony tools are creative production—not Research Tools | Browser access; optional login. **Not** an API ingest license for MarketOS | Trends/Top Ads UI (not a MarketOS-normalized ingest schema here) | Whether any future official readonly ingest API will exist | **No supported ingest.** Visibility ≠ scrape/API permission |
+| Marketing API (TikTok for Business) | Advertisers / partners operating owned ad accounts | Own-account campaigns; not market-wide public demand geography | Business Marketing API for campaign create/report—not Research Tools attention | Advertiser credentials / Business Center | Own-account analytics and mutation-adjacent campaign objects | Portal docs are SPA-heavy; field catalogs not fully extracted in this offline audit | **Not market-wide attention.** Own-account metrics must not be labeled competitor/demand proof; out of this layer’s scope |
 
-### Citations (primary)
+### Citations (primary, accessed 2026-10-15)
 
-- [Research API FAQ](https://developers.tiktok.com/doc/research-api-faq) — “I am a creator, advertiser, or commercial user… Am I eligible…? **No.**”; application + approved project required; quotas for approved research (accessed 2026-10-14).
-- [Getting Started - Research API](https://developers.tiktok.com/doc/research-api-get-started) — research client + bearer flow (accessed 2026-10-14).
-- [Getting Started - Commercial Content API](https://developers.tiktok.com/doc/commercial-content-api-getting-started) — Research Tools adlib path (accessed 2026-10-14).
-- [Developer docs overview](https://developers.tiktok.com/doc/overview) — Research Tools vs Creative Center (accessed 2026-10-14).
-- [Creative Center help](https://ads.tiktok.com/help/article/creative-center) — public inspiration hub (accessed 2026-10-14).
-- [TikTok API for Business portal](https://business-api.tiktok.com/portal/docs) — Marketing API advertiser surface (accessed 2026-10-14).
+- [Research Tools product page](https://developers.tiktok.com/products/research-api/) — researcher regions; non-commercial / independent-of-commercial-interests criteria.
+- [Research API FAQ](https://developers.tiktok.com/doc/research-api-faq) — “I am a creator, advertiser, or commercial user… Am I eligible…? **No.**”; country eligibility deferred to products page.
+- [Getting Started - Research API](https://developers.tiktok.com/doc/research-api-get-started) — research client + bearer flow.
+- [Query Videos](https://developers.tiktok.com/doc/research-api-specs-query-videos) — `region_code` includes `MX` (creator registration), not MarketOS coverage.
+- [Commercial Content API product page](https://developers.tiktok.com/products/commercial-content-api) — public/researchers; EU ads phase; requester any country.
+- [Getting Started - Commercial Content API](https://developers.tiktok.com/doc/commercial-content-api-getting-started) — research client under Research & Insights.
+- [Supported Countries (CCL)](https://developers.tiktok.com/doc/commercial-content-api-supported-countries) — EU / EEA / UK / CH; Mexico absent.
+- [Creative Center help](https://ads.tiktok.com/help/article/creative-center) — public inspiration hub.
+- [TikTok API for Business portal](https://business-api.tiktok.com/portal/docs) — Marketing API advertiser surface.
 
 ## What ordinary runtime does
 
 1. Status: `blocked_ineligible_commercial_use` (or related blocked statuses).
 2. `evidence_count = 0`, `operational_capability = false`, `eligible_live_source = null`.
-3. Surfaces matrix marks Research Tools commercial-ineligible and Creative Center /
-   Marketing API as unsupported for this use case.
+3. Surfaces matrix evaluates Research API, CCL, Creative Center, and Marketing API
+   separately; CCL notes explicitly refuse an assumed identical Research API
+   eligibility rule and mark Mexico unsupported for ad geography.
 4. Live requests (`allow_live` / `SidecarContext(dry_run=False)`) → `blocked_live_mode`.
 
 Offline demo modes (`fixture_demo`, `manual_import`, `fake_transport`) require
@@ -77,11 +82,13 @@ Path-disjoint from PR #459 (legacy client retirement) and PR #468 (TikTok route
 approval gate). Does not modify `backend/adapters/tiktok_organic.py`. Composition
 regressions: `tests/test_tiktok_vertical_composition.py`.
 
-## Future activation (only if eligibility changes)
+## Future activation (only if eligibility and geography change)
 
-1. TikTok FAQ/terms must expressly permit commercial MarketOS use (today: No).
-2. Approval Ledger `provider_call` with evidence.
-3. Metadata-only credential reference.
-4. Separately reviewed live transport + output contract + privacy review.
-5. Keep attention supplemental; never promote to purchase/supplier proof; never
+1. TikTok primary docs must expressly permit MarketOS commercial use **and**
+   document Mexico (or target-market) coverage for the chosen surface.
+2. Do not invent a live transport solely to appear operational.
+3. Approval Ledger `provider_call` with evidence.
+4. Metadata-only credential reference.
+5. Separately reviewed live transport + output contract + privacy review.
+6. Keep attention supplemental; never promote to purchase/supplier proof; never
    relabel Marketing API own-account metrics as market demand.

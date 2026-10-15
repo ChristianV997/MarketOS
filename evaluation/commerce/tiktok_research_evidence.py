@@ -3,11 +3,21 @@
 Offline / fixture / fake-transport only. Live TikTok Research Tools calls are
 default-off and blocked for MarketOS commercial use.
 
-Official Research Tools (Research API and Commercial Content API) require an
-approved research project. TikTok's Research API FAQ states creators,
-advertisers, and commercial users are not eligible (accessed 2026-10-14).
+Surfaces are evaluated separately from primary docs (rechecked 2026-10-15):
+
+- Research API / Research Tools FAQ: creators, advertisers, and commercial
+  users are not eligible (answer: No.). Applicant regions on the products page
+  do not include Mexico.
+- Commercial Content API: products page frames public/researchers access with
+  EU-phase ad data; Getting Started uses an approved research client. Do **not**
+  assume CCL shares the Research API eligibility rule verbatim—no dedicated CCL
+  FAQ was found. Supported Countries list EU/EEA/UK/CH; Mexico is not listed.
+- Creative Center: public website/inspiration hub ≠ ingest/scrape license.
+- Marketing API: advertiser own-account analytics/mutation ≠ market-wide demand.
+
 Academic Research API eligibility therefore does not authorize MarketOS
-commercial product research.
+commercial product research, and absence of an authorized Mexico source is a
+precise blocked/unavailable capability—not a generic “MarketOS offline” claim.
 
 This module does not replace ``backend.adapters.tiktok_organic`` (signal mock /
 Creative Center attempt path) and does not duplicate the generic consumer-
@@ -39,10 +49,10 @@ from evaluation.companyos.resource_execution_governor import (
     evaluate_execution_request,
 )
 
-REPORT_VERSION = "tiktok-research-evidence-v2"
+REPORT_VERSION = "tiktok-research-evidence-v3"
 SOURCE = "tiktok_research_tools"
-ACCESS_DATE = "2026-10-14"
-DOC_RECHECK_DATE = "2026-10-14"
+ACCESS_DATE = "2026-10-15"
+DOC_RECHECK_DATE = "2026-10-15"
 
 # Distinct TikTok surfaces evaluated for commercial consumer-attention research.
 EVALUATED_SURFACES = (
@@ -78,6 +88,10 @@ COMMERCIAL_INELIGIBILITY = (
     "tiktok_research_tools_require_approved_research_project",
     "tiktok_faq_commercial_users_ineligible_for_research_tools",
     "academic_research_api_eligibility_does_not_authorize_marketos_commercial_use",
+    "research_api_applicant_regions_exclude_mexico_per_products_page",
+    "commercial_content_api_eligibility_not_assumed_identical_to_research_api",
+    "commercial_content_api_ad_geography_eu_eea_uk_ch_mexico_not_listed",
+    "mexico_commercial_product_attention_has_no_eligible_live_source",
     "creative_center_website_visibility_is_not_scrape_or_api_permission",
     "marketing_api_is_advertiser_own_account_not_market_wide_attention",
     "no_eligible_official_live_source_for_marketos_commercial_attention",
@@ -215,22 +229,63 @@ class TikTokResearchEvidenceReport:
 def official_citations() -> tuple[dict[str, str], ...]:
     return (
         {
+            "title": "Research Tools product page",
+            "url": "https://developers.tiktok.com/products/research-api/",
+            "access_date": DOC_RECHECK_DATE,
+            "supports": (
+                "Qualified researchers in the U.S., Europe, Canada, and Brazil; "
+                "independent of commercial interests; Mexico not listed among applicant regions"
+            ),
+        },
+        {
             "title": "Getting Started - Research API",
             "url": "https://developers.tiktok.com/doc/research-api-get-started",
             "access_date": DOC_RECHECK_DATE,
             "supports": "Research API query flow; approved research client; bearer token; video/account query examples",
         },
         {
-            "title": "Research API FAQ",
+            "title": "Research API FAQ (Research Tools)",
             "url": "https://developers.tiktok.com/doc/research-api-faq",
             "access_date": DOC_RECHECK_DATE,
-            "supports": "Commercial/creator/advertiser users not eligible (answer: No.); approved research project required; quotas for approved research only",
+            "supports": (
+                "Research Tools FAQ: creator/advertiser/commercial user eligibility answer No.; "
+                "approved research project required; country eligibility deferred to products page; "
+                "quotas for approved research only"
+            ),
+        },
+        {
+            "title": "Query Videos (Research API)",
+            "url": "https://developers.tiktok.com/doc/research-api-specs-query-videos",
+            "access_date": DOC_RECHECK_DATE,
+            "supports": (
+                "region_code field enum includes MX as creator-account registration country; "
+                "this is not documented MarketOS applicant eligibility or Mexico commercial coverage"
+            ),
+        },
+        {
+            "title": "Commercial Content API product page",
+            "url": "https://developers.tiktok.com/products/commercial-content-api",
+            "access_date": DOC_RECHECK_DATE,
+            "supports": (
+                "Public and researchers framing; ads data from EU to begin with; "
+                "requester may be located in any country while data phase is EU-only; "
+                "application + client key; distinct from Research API academic criteria text"
+            ),
         },
         {
             "title": "Getting Started - Commercial Content API",
             "url": "https://developers.tiktok.com/doc/commercial-content-api-getting-started",
             "access_date": DOC_RECHECK_DATE,
-            "supports": "Commercial Content API under Research Tools; same approved research-client model as Research API",
+            "supports": (
+                "Research & Insights Commercial Content API path; approved research client + "
+                "client key/secret; does not publish a separate commercial-eligibility FAQ"
+            ),
+        },
+        {
+            "title": "Commercial Content API Supported Countries",
+            "url": "https://developers.tiktok.com/doc/commercial-content-api-supported-countries",
+            "access_date": DOC_RECHECK_DATE,
+            "supports": "Documented ad-data countries: EU, EEA, UK, CH; Mexico (MX) not listed",
         },
         {
             "title": "TikTok Developer Docs Overview",
@@ -262,6 +317,8 @@ def research_tool_capabilities() -> tuple[TikTokResearchCapability, ...]:
             (
                 "requires_approved_research_project",
                 "faq_commercial_creator_advertiser_users_not_eligible",
+                "products_page_applicant_regions_us_europe_canada_brazil_not_mexico",
+                "mx_in_video_region_code_enum_is_not_applicant_or_market_coverage",
                 "live_transport_absent",
             ),
         ),
@@ -269,8 +326,12 @@ def research_tool_capabilities() -> tuple[TikTokResearchCapability, ...]:
             "commercial_content_api",
             "blocked_ineligible_commercial_use",
             (
-                "under_research_tools_same_eligibility_as_research_api",
-                "faq_commercial_creator_advertiser_users_not_eligible",
+                "products_page_public_and_researchers_eu_ads_phase",
+                "getting_started_uses_approved_research_client",
+                "no_dedicated_ccl_commercial_eligibility_faq_found",
+                "do_not_assume_identical_research_api_eligibility_rule",
+                "supported_countries_eu_eea_uk_ch_mexico_not_listed",
+                "not_marketos_mexico_commercial_product_attention_source",
                 "live_transport_absent",
             ),
         ),
@@ -389,6 +450,8 @@ def build_tiktok_research_evidence(
         "no_credentials_read",
         "no_unofficial_scrape_or_proxy",
         "research_tools_ineligible_for_marketos_commercial_use_per_official_faq",
+        "ccl_eligibility_not_copied_from_research_api_without_primary_evidence",
+        "mexico_not_documented_as_ccl_supported_ad_country",
         "no_supported_official_commercial_attention_source",
         "does_not_duplicate_generic_consumer_attention_importer_cli",
         "does_not_authorize_ad_creation_spend_messaging_or_publishing",

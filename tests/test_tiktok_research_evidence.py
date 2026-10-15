@@ -205,6 +205,9 @@ def test_official_citations_include_faq_and_access_date():
     urls = {item["url"] for item in cites}
     assert "https://developers.tiktok.com/doc/research-api-faq" in urls
     assert "https://developers.tiktok.com/doc/commercial-content-api-getting-started" in urls
+    assert "https://developers.tiktok.com/products/commercial-content-api" in urls
+    assert "https://developers.tiktok.com/doc/commercial-content-api-supported-countries" in urls
+    assert "https://developers.tiktok.com/products/research-api/" in urls
     assert all(item["access_date"] == ACCESS_DATE for item in cites)
 
 
@@ -214,6 +217,26 @@ def test_research_tool_capabilities_all_evaluated_surfaces_blocked():
     assert names == {"research_api", "commercial_content_api", "creative_center", "marketing_api"}
     assert all(not item.eligible_for_marketos_commercial_use for item in surfaces)
     assert all(not item.live_transport_implemented for item in surfaces)
+
+
+def test_ccl_capability_does_not_assume_identical_research_api_eligibility():
+    ccl = next(item for item in research_tool_capabilities() if item.surface == "commercial_content_api")
+    joined = " ".join(ccl.notes)
+    assert "same_eligibility_as_research_api" not in joined
+    assert "do_not_assume_identical_research_api_eligibility_rule" in ccl.notes
+    assert "supported_countries_eu_eea_uk_ch_mexico_not_listed" in ccl.notes
+    assert "not_marketos_mexico_commercial_product_attention_source" in ccl.notes
+
+
+def test_mexico_commercial_attention_boundary_blockers():
+    report = build_tiktok_research_evidence()
+    assert "mexico_commercial_product_attention_has_no_eligible_live_source" in report.blockers
+    assert "commercial_content_api_eligibility_not_assumed_identical_to_research_api" in report.blockers
+    assert "commercial_content_api_ad_geography_eu_eea_uk_ch_mexico_not_listed" in report.blockers
+    assert "research_api_applicant_regions_exclude_mexico_per_products_page" in report.blockers
+    assert report.evidence_count == 0
+    assert report.operational_capability is False
+    assert report.eligible_live_source is None
 
 
 def test_render_markdown_includes_surfaces_and_citations():
