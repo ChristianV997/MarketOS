@@ -98,7 +98,10 @@ def test_valid_live_receipts_are_accepted_without_rewriting_diagnostic_recommend
 
 def test_live_claims_are_not_source_verification():
     packet = _live_packet()
-    packet["receipts"]["marketplace"][0]["source_reference"] = "https://claimed.example/receipt/1"
+    receipt = packet["receipts"]["marketplace"][0]
+    receipt["source_reference"] = "https://claimed.example/receipt/1"
+    receipt["source_verified"] = True
+    receipt["authenticated_observation"] = True
 
     report = harness.evaluate_live_packet(packet)
 
