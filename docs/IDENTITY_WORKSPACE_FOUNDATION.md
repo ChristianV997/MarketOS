@@ -38,6 +38,15 @@ def handler(access: WorkspaceAccess = Depends(resolve_workspace_access)): ...
 * **TrustOS:** requests and responses pass `check_workspace_leakage` from `evaluation/trustos/client_workspace_isolation.py`. `export_client_evidence` is *not* used: it requires a registration in the JSON `WorkspaceRegistry` (a second catalog, see blocker 4) and a fixed field allow-list that does not describe a profile. **Known cost:** the screen is substring-based, so legitimate text containing words such as "strategy", "token", "formula" or a leading "/" in values is rejected (422 on write, 500 on read of a stored value).
 * The database role column is checked with the application's `role_grants`; `0002` is nullable so existing memberships have no role until an operator assigns one. There is still no route to assign roles or memberships.
 
+## Operator runtime and commerce gates (`backend/identity/operator_gates.py`)
+
+Mutating routes that drive the runtime loop, the global kill-switch, or commerce execution depend on `runtime_control_gate` or `commerce_execution_gate`. Each is `require_workspace_permission(OWNER_TYPE, <permission>)`, so the caller's sole `internal` membership must have a role that grants the permission.
+
+* `runtime_control:write`, granted to `internal_operator` only: `POST /cycle`, `POST /runner/pause`, `POST /runner/resume` (`api/routes/cycle_control.py`), and `POST /risk/killswitch/activate` and `/deactivate` (`api/routes/agents_risk.py`).
+* `commerce_execution:write`, granted to `internal_operator` only: `POST /commerce/cycle`, `POST /commerce/provider-cycle`, `POST /commerce/publish`, and `POST /integrations/postiz/analytics/reconcile` (`backend/api.py`).
+* A refused request runs no handler code, so it makes no side effect and no outbound call: anonymous is 401, `client_viewer` or any role without the permission is 403, and no configured verifier or repository is 503. `tests/identity/test_runtime_control_gates.py` checks each refusal with recorders on every side-effect seam, and checks one authorized operator call per route with the effect stubbed.
+* Like the credential routes, these answer 503 in every deployment today, because no verifier or repository is wired. The frontend's command controls (`/cycle`, `/runner/*`, `/risk/killswitch/*`) send no identity and fail closed until a deployment wires one. The CI container smoke asserts that an anonymous `POST /commerce/cycle` gets 503.
+
 ## Credential-setup API (`api/credentials_setup.py`)
 
 `POST /api/setup/credentials/set` and `POST /api/setup/test/{service}`, mounted by `backend/api.py` under `/api/setup`. The read-only `GET /api/setup/credentials/status` and `GET /api/setup/instructions[/{service}]` stay unauthenticated: they return booleans and static text only, and no value, path or exception text.

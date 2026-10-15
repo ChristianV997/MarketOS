@@ -88,6 +88,12 @@ def smoke_client(monkeypatch):
     monkeypatch.delenv("MEDUSA_REQUIRED_FOR_READY", raising=False)
     api = _install_inert_runtime(monkeypatch)
     from fastapi.testclient import TestClient
+    from backend.identity.operator_gates import commerce_execution_gate
+    from backend.identity.workspaces import WorkspaceAccess
+
+    # Commerce execution is operator-only; the dry-run contract is checked for an authorized caller.
+    operator = WorkspaceAccess("https://issuer.test", "synthetic-operator", "ws_synthetic", "internal", "synthetic", "internal_operator")
+    monkeypatch.setitem(api.app.dependency_overrides, commerce_execution_gate, lambda: operator)
 
     with TestClient(api.app) as client:
         yield client

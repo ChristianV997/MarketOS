@@ -29,9 +29,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import Body, FastAPI, Header
+from fastapi import Body, Depends, FastAPI, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from backend.identity.operator_gates import commerce_execution_gate
+from backend.identity.workspaces import WorkspaceAccess
 from backend.security.cors import parse_allowed_origins
 from backend.security.request_context import RequestContextMiddleware
 
@@ -778,27 +780,24 @@ def evaluation_product(payload: dict[str, Any] = Body(...)):
 
 
 @app.post("/commerce/cycle")
-def commerce_cycle(payload: dict[str, Any] | None = Body(default=None)):
+def commerce_cycle(payload: dict[str, Any] | None = Body(default=None), _access: WorkspaceAccess = Depends(commerce_execution_gate)):
     """Run the complementary commerce loop from signal to feedback.
 
-    Live platform execution requires an explicit JSON ``confirm_live: true``
-    acknowledgement; omitted or malformed boolean values remain dry-run.
+    Only dry runs dispatch. ``dry_run`` must be a JSON boolean; any other value is refused. A live request is
+    refused before dispatch until the canonical approval ledger can grant it (``backend.commerce.live_authority``).
+    No request field grants approval.
     """
     try:
         from backend.commerce import run_commerce_cycle
+        from backend.commerce.live_authority import decide_dispatch, parse_dry_run
 
         data = payload or {}
-        raw_dry_run = data.get("dry_run", True)
-        dry_run = (
-            raw_dry_run
-            if isinstance(raw_dry_run, bool)
-            else str(raw_dry_run).strip().lower() not in {"false", "0", "no", "off"}
-        )
-        if not dry_run and data.get("confirm_live") is not True:
-            return {
-                "launchable": False,
-                "reasons": ["live_execution_requires_confirm_live"],
-            }
+        dry_run = parse_dry_run(data)
+        if dry_run is None:
+            return {"launchable": False, "reasons": ["invalid_dry_run_flag"]}
+        decision = decide_dispatch(dry_run=dry_run)
+        if not decision.allowed:
+            return {"launchable": False, "approval_state": decision.approval_state, "reasons": list(decision.reasons)}
         top_k = int(data.get("top_k", 5) or 5)
         budget = float(data.get("budget", 20.0) or 20.0)
         if top_k < 1 or budget < 0:
@@ -839,7 +838,7 @@ def commerce_cycle(payload: dict[str, Any] | None = Body(default=None)):
 
 
 @app.post("/commerce/provider-cycle")
-def commerce_provider_cycle(payload: dict[str, Any] | None = Body(default=None)):
+def commerce_provider_cycle(payload: dict[str, Any] | None = Body(default=None), _access: WorkspaceAccess = Depends(commerce_execution_gate)):
     """Run the canonical loop from allowlisted research URLs.
 
     This endpoint is dry-run by default and delegates all ranking, QA, launch,
@@ -850,18 +849,22 @@ def commerce_provider_cycle(payload: dict[str, Any] | None = Body(default=None))
         urls = data.get("urls") or data.get("research_urls") or []
         if not isinstance(urls, list) or not urls or len(urls) > 20 or not all(isinstance(url, str) and url.strip() for url in urls):
             return {"launchable": False, "reasons": ["provider_cycle_requires_1_to_20_urls"]}
-        raw_dry_run = data.get("dry_run", True)
-        dry_run = raw_dry_run if isinstance(raw_dry_run, bool) else str(raw_dry_run).lower() not in {"false", "0", "no", "off"}
-        if not dry_run and data.get("confirm_live") is not True:
-            return {"launchable": False, "reasons": ["live_execution_requires_confirm_live"]}
+        from backend.commerce.live_authority import decide_dispatch, parse_dry_run
+
+        dry_run = parse_dry_run(data)
+        if dry_run is None:
+            return {"launchable": False, "reasons": ["invalid_dry_run_flag"]}
+        decision = decide_dispatch(dry_run=dry_run)
+        if not decision.allowed:
+            return {"launchable": False, "approval_state": decision.approval_state, "reasons": list(decision.reasons)}
         from backend.commerce import run_provider_cycle
         from backend.contracts.adapters import SidecarContext
         report = run_provider_cycle(
             urls,
-            context=SidecarContext(dry_run=dry_run, approval_state="approved" if not dry_run else "not_required"),
+            context=SidecarContext(dry_run=decision.dry_run, approval_state=decision.approval_state),
             top_k=max(1, min(int(data.get("top_k", 5) or 5), 50)),
             budget=max(0.0, float(data.get("budget", 20.0) or 20.0)),
-            dry_run=dry_run,
+            dry_run=decision.dry_run,
         )
         return report.to_dict()
     except Exception as exc:
@@ -939,29 +942,33 @@ def integration_webhook(source: str, payload: dict[str, Any] = Body(...), x_webh
 
 
 @app.post("/commerce/publish")
-def commerce_publish(payload: dict[str, Any] | None = Body(default=None)):
+def commerce_publish(payload: dict[str, Any] | None = Body(default=None), _access: WorkspaceAccess = Depends(commerce_execution_gate)):
     """Publish one canonical CreativeBundle through the publishing adapter."""
     try:
+        from backend.commerce.live_authority import decide_dispatch, parse_dry_run
+
         data = payload or {}
-        raw_dry_run = data.get("dry_run", True)
-        dry_run = raw_dry_run if isinstance(raw_dry_run, bool) else str(raw_dry_run).lower() not in {"false", "0", "no", "off"}
-        if not dry_run and data.get("confirm_live") is not True:
-            return {"published": False, "reasons": ["live_publishing_requires_confirm_live"]}
+        dry_run = parse_dry_run(data)
+        if dry_run is None:
+            return {"published": False, "reasons": ["invalid_dry_run_flag"]}
+        decision = decide_dispatch(dry_run=dry_run)
+        if not decision.allowed:
+            return {"published": False, "approval_state": decision.approval_state, "reasons": list(decision.reasons)}
         bundle_data = data.get("bundle") if isinstance(data.get("bundle"), dict) else data
         from backend.commerce.contracts import CreativeBundle
         from backend.commerce.loop import CommerceLoop
         bundle = CreativeBundle(**{key: value for key, value in bundle_data.items() if key in CreativeBundle.__dataclass_fields__})
         records = CommerceLoop().publish_creatives(
-            [bundle], dry_run=dry_run,
-            approval_state="approved" if not dry_run else "not_required",
+            [bundle], dry_run=decision.dry_run,
+            approval_state=decision.approval_state,
         )
-        return {"published": bool(records), "dry_run": dry_run, "records": records, "artifact_id": bundle.artifact_id}
+        return {"published": bool(records), "dry_run": decision.dry_run, "records": records, "artifact_id": bundle.artifact_id}
     except Exception as exc:
         return {"published": False, "reasons": ["invalid_publish_request", str(exc)]}
 
 
 @app.post("/integrations/postiz/analytics/reconcile")
-def reconcile_postiz_analytics(payload: dict[str, Any] = Body(...)):
+def reconcile_postiz_analytics(payload: dict[str, Any] = Body(...), _access: WorkspaceAccess = Depends(commerce_execution_gate)):
     """Fetch one Postiz post's analytics and store canonical feedback evidence."""
     post_id = str(payload.get("post_id") or "").strip()
     campaign_id = str(payload.get("campaign_id") or "").strip()

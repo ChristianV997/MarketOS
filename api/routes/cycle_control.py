@@ -4,15 +4,17 @@ from __future__ import annotations
 import threading
 import time
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from backend import api as _core
+from backend.identity.operator_gates import runtime_control_gate
+from backend.identity.workspaces import WorkspaceAccess
 
 router = APIRouter()
 
 
 @router.post("/cycle")
-def cycle():
+def cycle(_access: WorkspaceAccess = Depends(runtime_control_gate)):
     """Trigger one manual cycle (useful for testing / Replit buttons)."""
     from backend.execution.loop import run_cycle
 
@@ -29,14 +31,14 @@ def cycle():
 
 
 @router.post("/runner/pause")
-def pause_runner():
+def pause_runner(_access: WorkspaceAccess = Depends(runtime_control_gate)):
     """Pause the background cycle runner."""
     _core._bg_running = False
     return {"bg_running": False}
 
 
 @router.post("/runner/resume")
-def resume_runner():
+def resume_runner(_access: WorkspaceAccess = Depends(runtime_control_gate)):
     """Resume the background cycle runner if paused."""
     if not _core._bg_running:
         _core._bg_running = True
