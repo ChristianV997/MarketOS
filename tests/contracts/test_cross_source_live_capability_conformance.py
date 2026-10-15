@@ -131,9 +131,11 @@ def _validate_outcome(capability: SourceCapability, outcome: Mapping[str, Any]) 
     required = {
         "status",
         "source_id",
+        "candidate_id",
         "evidence_class",
         "provenance",
         "observed_at",
+        "freshness",
         "geography",
         "language",
         "currency",
@@ -167,9 +169,11 @@ def _outcome(**overrides: Any) -> dict[str, Any]:
     result: dict[str, Any] = {
         "status": "fixture_only",
         "source_id": "synthetic-source",
+        "candidate_id": "synthetic-candidate",
         "evidence_class": "fixture",
         "provenance": "fixture",
         "observed_at": "2026-10-14T00:00:00Z",
+        "freshness": "fresh",
         "geography": "US",
         "language": "en",
         "currency": None,
