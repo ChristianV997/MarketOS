@@ -17,10 +17,26 @@ PROFILE_CREATE = "client_profile:create"
 PROFILE_UPDATE = "client_profile:update"
 CREDENTIAL_WRITE = "setup_credential:write"
 CREDENTIAL_TEST = "setup_credential:test"
+# Intelligence runs: one permission per domain, so a grant covers only its own routes. A run persists analysis
+# state or reads internal evidence; none of them makes an outbound network or provider call.
+INTELLIGENCE_RUN = "intelligence:run"
+CREATIVE_INTELLIGENCE_RUN = "creative_intelligence:run"
+COMMERCIAL_INTELLIGENCE_RUN = "commercial_intelligence:run"
 
 ROLE_PERMISSIONS: Mapping[str, frozenset[str]] = {
     CLIENT_VIEWER: frozenset({PROFILE_READ}),
-    INTERNAL_OPERATOR: frozenset({PROFILE_READ, PROFILE_CREATE, PROFILE_UPDATE, CREDENTIAL_WRITE, CREDENTIAL_TEST}),
+    INTERNAL_OPERATOR: frozenset(
+        {
+            PROFILE_READ,
+            PROFILE_CREATE,
+            PROFILE_UPDATE,
+            CREDENTIAL_WRITE,
+            CREDENTIAL_TEST,
+            INTELLIGENCE_RUN,
+            CREATIVE_INTELLIGENCE_RUN,
+            COMMERCIAL_INTELLIGENCE_RUN,
+        }
+    ),
 }
 
 
