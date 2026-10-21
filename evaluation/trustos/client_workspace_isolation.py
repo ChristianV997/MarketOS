@@ -72,7 +72,7 @@ _SOURCE_CODE_VALUE = re.compile(
     r"(?im)^\s*(?:(?:async\s+)?def|class|import|from|(?:export\s+)?(?:async\s+)?function)\s+\w+"
     r"|^\s*(?:export\s+)?(?:const|let|var)\s+\w+\s*=\s*(?:\([^)]*\)|[A-Za-z0-9_]+)\s*=>"
 )
-_FILESYSTEM_PATH_VALUE = re.compile(r"(?i)(?:^|[\s=(\[{,:])(?:file://|[a-z]:[\\/]|\\\\|/(?!/)|[^\\/\s]+\\[^\\/\s]+)")
+# Filesystem-path detection below is intentionally a linear parser, not a regex.
 _CLIENT_IDENTITY_KEYS = frozenset({"workspace_id", "client_id", "tenant_id", "workspace", "tenant"})
 _NON_AUTHORITATIVE_CLAIM_MARKERS = ("actual", "live", "live_validated", "verified_live", "production")
 _SAFE_WORKSPACE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -493,7 +493,72 @@ def _contains_forbidden_value(value: str) -> bool:
 
 
 def _contains_filesystem_path(value: str) -> bool:
-    return _FILESYSTEM_PATH_VALUE.search(value) is not None
+    """Detect the boundary's path forms in one pass, without backtracking regex."""
+    boundary_punctuation = "=([{,:"
+    segment_start = 0
+    last_boundary = -1
+    previous_boundary = -1
+    forward_separator_in_path = False
+
+    for index, char in enumerate(value):
+        previous_is_boundary = index == 0 or value[index - 1].isspace() or value[index - 1] in boundary_punctuation
+        if previous_is_boundary:
+            if value[index:index + 7].casefold() == "file://":
+                return True
+            if (
+                index + 2 < len(value)
+                and char.isascii()
+                and char.isalpha()
+                and value[index + 1] == ":"
+                and value[index + 2] in "\\/"
+            ):
+                return True
+            if value.startswith("\\\\", index):
+                return True
+            if char == "/" and (index + 1 == len(value) or value[index + 1] != "/"):
+                return True
+
+        if char.isspace() or char in "/\\":
+            has_component_start = (
+                (
+                    index > segment_start
+                    and (
+                        segment_start == 0
+                        or value[segment_start - 1].isspace()
+                    )
+                )
+                or (
+                    last_boundary >= segment_start
+                    and last_boundary < index - 1
+                )
+                or (
+                    last_boundary == index - 1
+                    and previous_boundary >= segment_start
+                    and previous_boundary < index - 1
+                )
+            )
+            if (
+                char == "/"
+                and index + 1 < len(value)
+                and value[index + 1] != "/"
+                and has_component_start
+            ):
+                forward_separator_in_path = True
+            if char == "\\" and index + 1 < len(value) and not (
+                value[index + 1].isspace() or value[index + 1] in "/\\"
+            ):
+                if has_component_start or (forward_separator_in_path and index > segment_start):
+                    return True
+            if char.isspace() or char == "\\":
+                forward_separator_in_path = False
+            segment_start = index + 1
+            last_boundary = -1
+            previous_boundary = -1
+        elif char in boundary_punctuation:
+            previous_boundary = last_boundary
+            last_boundary = index
+
+    return False
 
 
 class ClientWorkspaceExportError(ValueError):
