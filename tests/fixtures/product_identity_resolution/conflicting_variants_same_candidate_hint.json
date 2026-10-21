@@ -1,0 +1,49 @@
+{
+  "fixture_id": "product-identity-conflicting-variants-hint-v1",
+  "description": "Shared candidate_id_hint must not exact-match conflicting pack/brand/model variants.",
+  "observations": [
+    {
+      "observation_id": "hint-pack-2",
+      "workspace_id": "ws-variant",
+      "source_kind": "marketplace",
+      "source_system": "amazon",
+      "source_record_id": "listing-pack-2",
+      "title": "Acme Widget Family Pack Two",
+      "brand": "Acme",
+      "model": "WP-200",
+      "gtin": "",
+      "asin": "",
+      "mpn": "",
+      "pack_size": "2",
+      "variant_size": "small",
+      "evidence_mode": "fixture",
+      "candidate_id_hint": "shared-candidate-1"
+    },
+    {
+      "observation_id": "hint-pack-6",
+      "workspace_id": "ws-variant",
+      "source_kind": "supplier",
+      "source_system": "cj",
+      "source_record_id": "offer-pack-6",
+      "title": "Different Listing Title Entirely",
+      "brand": "OtherBrand",
+      "model": "ZZ-9",
+      "gtin": "",
+      "asin": "",
+      "mpn": "",
+      "pack_size": "6",
+      "variant_size": "large",
+      "evidence_mode": "manual_import",
+      "candidate_id_hint": "shared-candidate-1"
+    }
+  ],
+  "expect": {
+    "shared_candidate_key": false,
+    "match_states": ["conflict"],
+    "forbidden_states": ["exact_match"],
+    "required_conflict_reasons": [
+      "variant_or_pack_size_conflict",
+      "candidate_id_hint_does_not_override_variant"
+    ]
+  }
+}

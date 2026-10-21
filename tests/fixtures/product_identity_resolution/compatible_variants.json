@@ -1,0 +1,44 @@
+{
+  "fixture_id": "product-identity-compatible-variants-v1",
+  "description": "Same GTIN and compatible pack/size/color (one side empty) must exact_match.",
+  "observations": [
+    {
+      "observation_id": "compat-mkt",
+      "workspace_id": "ws-variant",
+      "source_kind": "marketplace",
+      "source_system": "amazon",
+      "source_record_id": "B00COMPAT01",
+      "title": "Acme Bottle 500ml",
+      "brand": "Acme",
+      "model": "BTL-500",
+      "gtin": "012345678905",
+      "asin": "B00COMPAT01",
+      "pack_size": "1",
+      "variant_size": "500ml",
+      "variant_color": "clear",
+      "evidence_mode": "fixture",
+      "candidate_id_hint": "bottle-500"
+    },
+    {
+      "observation_id": "compat-sup",
+      "workspace_id": "ws-variant",
+      "source_kind": "supplier",
+      "source_system": "cj",
+      "source_record_id": "cj-bottle-500",
+      "title": "Acme Bottle 500 mL",
+      "brand": "Acme",
+      "model": "BTL-500",
+      "gtin": "0012345678905",
+      "pack_size": "1",
+      "variant_size": "",
+      "variant_color": "clear",
+      "evidence_mode": "manual_import",
+      "candidate_id_hint": "bottle-500"
+    }
+  ],
+  "expect": {
+    "shared_candidate_key": true,
+    "match_states": ["exact_match"],
+    "forbidden_states": ["conflict"]
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "fixture_id": "product-identity-missing-identifiers-v1",
+  "description": "Name-only rows without GTIN/ASIN/MPN/SKU stay review-only or unmatched — never exact.",
+  "observations": [
+    {
+      "observation_id": "miss-a",
+      "workspace_id": "ws-missing",
+      "source_kind": "marketplace",
+      "source_system": "amazon",
+      "source_record_id": "listing-name-a",
+      "title": "Portable Mini Thermal Printer",
+      "brand": "",
+      "model": "",
+      "gtin": "",
+      "asin": "",
+      "mpn": "",
+      "seller_sku": "",
+      "evidence_mode": "fixture",
+      "candidate_id_hint": ""
+    },
+    {
+      "observation_id": "miss-b",
+      "workspace_id": "ws-missing",
+      "source_kind": "consumer_attention",
+      "source_system": "tiktok",
+      "source_record_id": "tt-name-b",
+      "title": "Portable Mini Thermal Printer",
+      "brand": "",
+      "model": "",
+      "gtin": "",
+      "asin": "",
+      "mpn": "",
+      "evidence_mode": "fixture",
+      "candidate_id_hint": ""
+    }
+  ],
+  "expect": {
+    "shared_candidate_key": false,
+    "allowed_states": ["possible_match", "ambiguous", "unmatched"],
+    "forbidden_states": ["exact_match"]
+  }
+}
