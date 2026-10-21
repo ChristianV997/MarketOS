@@ -1,0 +1,51 @@
+{
+  "fixture_id": "trends-interest-valid-v1",
+  "fixture_mode": true,
+  "provider_id": "google_trends_official",
+  "request_kind": "interest_over_time",
+  "terms": ["desk fan", "portable air cooler"],
+  "geography": "US",
+  "language": "en",
+  "time_resolution": "WEEK",
+  "window_start": "2024-01-01",
+  "window_end": "2024-03-31",
+  "series": [
+    {
+      "term": "desk fan",
+      "geography": "US",
+      "language": "en",
+      "time_resolution": "WEEK",
+      "points": [
+        {
+          "observation_period_start": "2024-01-01",
+          "observation_period_end": "2024-01-07",
+          "relative_interest": 38,
+          "status": "collected",
+          "collected_at": "2024-04-02T00:00:00Z"
+        },
+        {
+          "observation_period_start": "2024-01-08",
+          "observation_period_end": "2024-01-14",
+          "relative_interest": 41,
+          "status": "collected",
+          "collected_at": "2024-04-02T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "term": "portable air cooler",
+      "geography": "US",
+      "language": "en",
+      "time_resolution": "WEEK",
+      "points": [
+        {
+          "observation_period_start": "2024-01-01",
+          "observation_period_end": "2024-01-07",
+          "relative_interest": 22,
+          "status": "collected",
+          "collected_at": "2024-04-02T00:00:00Z"
+        }
+      ]
+    }
+  ]
+}

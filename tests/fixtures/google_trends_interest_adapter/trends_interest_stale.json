@@ -1,0 +1,29 @@
+{
+  "fixture_id": "trends-interest-stale-v1",
+  "fixture_mode": true,
+  "provider_id": "google_trends_official",
+  "request_kind": "interest_over_time",
+  "terms": ["desk fan"],
+  "geography": "GB",
+  "language": "en",
+  "time_resolution": "MONTH",
+  "window_start": "2023-01-01",
+  "window_end": "2023-06-30",
+  "series": [
+    {
+      "term": "desk fan",
+      "geography": "GB",
+      "language": "en",
+      "time_resolution": "MONTH",
+      "points": [
+        {
+          "observation_period_start": "2023-01-01",
+          "observation_period_end": "2023-01-31",
+          "relative_interest": 55,
+          "status": "collected",
+          "collected_at": "2023-02-05T00:00:00Z"
+        }
+      ]
+    }
+  ]
+}
