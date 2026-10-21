@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { adaptApprovalLedger } from "../lib/adaptApprovalLedger.ts";
 import { composeApprovalLedgerView, moveSelection, requestIds } from "../lib/composeApprovalLedgerView.ts";
 import { humanizeToken, safeDisplayText } from "../lib/safeText.ts";
@@ -17,13 +17,26 @@ export function ApprovalLedgerReview({
   packet,
   loading = false,
   errorMessage = null,
+  source = "demo_fixture",
+  fileLabel = null,
+  adaptSource = "demo_fixture",
 }: {
   packet: unknown;
   loading?: boolean;
   errorMessage?: string | null;
+  source?: "demo_fixture" | "local_file";
+  fileLabel?: string | null;
+  adaptSource?: "demo_fixture" | "local_file";
 }) {
-  const adapted = useMemo(() => adaptApprovalLedger(packet), [packet]);
+  const adapted = useMemo(
+    () => adaptApprovalLedger(packet, { source: adaptSource }),
+    [adaptSource, packet],
+  );
   const [selected, setSelected] = useState<string | null>(null);
+  // Drop prior selection when the operator swaps demo ↔ local report (or loads another file).
+  useEffect(() => {
+    setSelected(null);
+  }, [adaptSource, packet]);
   const view = useMemo(() => composeApprovalLedgerView({
     loading,
     errorMessage,
@@ -33,12 +46,19 @@ export function ApprovalLedgerReview({
   }), [adapted, errorMessage, loading, selected]);
 
   const ids = requestIds(view.model);
+  const sourceLabel = source === "local_file"
+    ? (fileLabel
+      ? `local import · ${safeDisplayText(fileLabel, 80)}`
+      : "local import")
+    : "demo fixture planning record";
 
   return (
     <section
       aria-labelledby="approval-ledger-heading"
       className="min-w-0 space-y-4 p-3 sm:p-4 text-zinc-100"
       data-testid="companyos-approval-ledger-review"
+      data-report-source={source}
+      data-availability={view.model.availability}
     >
       <a
         href="#approval-ledger-requests"
@@ -52,7 +72,7 @@ export function ApprovalLedgerReview({
           CompanyOS Approval Ledger
         </h1>
         <p className="text-sm text-zinc-300">
-          Offline policy and decision review · {safeDisplayText(view.model.report_version, 64)} · fixture planning record
+          Offline policy and decision review · {safeDisplayText(view.model.report_version, 64)} · {sourceLabel}
         </p>
         <p className="rounded border border-amber-700/60 bg-amber-950/40 p-3 text-sm text-amber-100" role="note">
           {view.authorityNote}

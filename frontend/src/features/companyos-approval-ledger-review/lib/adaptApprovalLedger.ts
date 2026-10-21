@@ -28,6 +28,11 @@ export interface AdaptResult {
   model: ApprovalLedgerViewModel;
 }
 
+export interface AdaptOptions {
+  /** Origin of the packet: built-in demo fixture or operator-selected local JSON. */
+  source?: "demo_fixture" | "local_file";
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -239,7 +244,13 @@ function safety(raw: unknown): LedgerSafetySummary {
   };
 }
 
-export function adaptApprovalLedger(raw: unknown): AdaptResult {
+export function adaptApprovalLedger(raw: unknown, options: AdaptOptions = {}): AdaptResult {
+  const source = options.source === "local_file" ? "local_file" : "demo_fixture";
+  const availability = source === "local_file" ? "local_import" : "fixture";
+  const sourceLimitation = source === "local_file"
+    ? "Operator-selected local JSON is held in browser memory only. It is not uploaded, persisted, or treated as live authority."
+    : "Built-in demo fixture only. Load a local companyos-approval-ledger-v1 JSON from scripts/run_companyos_approval_ledger.py for operator review.";
+
   const packet = record(raw);
   if (!packet) return { rejected: true, reason: "malformed", model: empty("Report is not an object.") };
   if (leaky(packet)) return { rejected: true, reason: "prohibited_field", model: empty("Prohibited or secret-shaped field rejected.") };
@@ -296,10 +307,12 @@ export function adaptApprovalLedger(raw: unknown): AdaptResult {
       policies,
       simulations,
       audit_event_count: Array.isArray(packet.audit_events) ? packet.audit_events.length : 0,
+      // Always false: imported JSON cannot authorize execution on this surface.
       execution_authorized: false,
       offline_planning_only: true,
-      availability: "fixture",
+      availability,
       limitations: [
+        sourceLimitation,
         "Offline CompanyOS Approval Ledger artifact. No write, approve, publish, spend, order, or provider action is available here.",
         "A simulated or recorded decision is never live authority.",
         "Scorecards and drafts do not authorize execution.",

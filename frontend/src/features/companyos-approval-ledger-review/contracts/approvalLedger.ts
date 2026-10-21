@@ -137,6 +137,9 @@ export interface ApprovalLedgerViewModel {
   execution_authorized: false;
   /** Always true: scorecards/drafts never authorize execution here. */
   offline_planning_only: true;
-  availability: "fixture" | "unavailable";
+  /** demo fixture vs operator-selected local JSON vs rejected/unavailable. */
+  availability: "fixture" | "local_import" | "unavailable";
   limitations: string[];
 }
+
+export type ApprovalLedgerReportSource = "demo_fixture" | "local_file";
