@@ -4,6 +4,8 @@ from types import ModuleType
 
 from unittest.mock import patch
 
+import pytest
+
 
 def _install_firecrawl_stub(monkeypatch, client):
     """Exercise the optional client path without requiring its package in CI."""
@@ -190,55 +192,34 @@ def test_google_trends_register():
 def test_mercadolibre_fetch_shape(monkeypatch):
     import backend.adapters.mercadolibre_trends as mod
 
-    mod._CACHE = []
-    mod._CACHE_TS = 0.0
-    mod._SITES = ["MLA"]
-    mod._QUERIES = ["electronica"]
-
-    fixture_response = {
-        "results": [
-            {
-                "title": "Auriculares Bluetooth Inalambricos",
-                "price": 4500.0,
-                "sold_quantity": 320,
-                "available_quantity": 500,
-                "permalink": "https://articulo.mercadolibre.com.ar/MLA-123",
-                "category_id": "MLA1000",
-            }
-        ]
-    }
-
-    class FakeResponse:
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return fixture_response
-
-    with patch("requests.get", return_value=FakeResponse()):
-        results = mod.fetch()
-
-    assert isinstance(results, list)
-    assert len(results) == 1
-    r = results[0]
+    r = mod._item_to_signal({
+        "id": "MLA123", "title": "Auriculares Bluetooth Inalambricos",
+        "price": 4500.0, "currency_id": "ARS", "sold_quantity": 320,
+        "available_quantity": 500,
+        "permalink": "https://articulo.mercadolibre.com.ar/MLA-123",
+        "category_id": "MLA1000",
+    }, "MLA")
     assert r["product"] == "Auriculares Bluetooth Inalambricos"
     assert r["source"] == "mercadolibre"
     assert r["platform"] == "mercadolibre"
     assert r["market"] == "MLA"
-    assert 0.0 <= r["score"] <= 1.0
-    assert 0.0 <= r["velocity"] <= 1.0
+    assert r["price"] == 4500.0 and r["currency"] == "ARS"
+    assert r["score"] is None and r["velocity"] is None
+    assert r["evidence_mode"] == "fixture"
 
 
-def test_mercadolibre_fetch_returns_empty_on_network_failure():
+def test_mercadolibre_fetch_is_blocked_before_network_or_legacy_cache(monkeypatch):
     import backend.adapters.mercadolibre_trends as mod
+    from backend.adapters.research.trend_source_v1 import AdapterFetchError
 
-    mod._CACHE = []
-    mod._CACHE_TS = 0.0
+    monkeypatch.setattr(mod, "_CACHE", [{"product": "old", "velocity": 1}], raising=False)
 
-    with patch("requests.get", side_effect=Exception("no network")):
-        results = mod.fetch()
-
-    assert results == []
+    with patch("requests.get", side_effect=AssertionError("network forbidden")) as request:
+        with pytest.raises(AdapterFetchError, match="mercadolibre_live_access_blocked") as exc:
+            mod.fetch()
+        assert exc.value.error_type == "unavailable" and exc.value.retryable is False
+        assert exc.value.context == {"code": "mercadolibre_live_access_blocked"}
+        request.assert_not_called()
 
 
 def test_mercadolibre_register():
