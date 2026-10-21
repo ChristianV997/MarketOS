@@ -34,6 +34,11 @@ Resource execution governance: `evaluation.companyos.resource_execution_governor
 is the canonical offline authority for deterministic budget, quota, portfolio,
 model spend, runaway guard, and cross-department decisions.
 
+Validation sprint planning: `backend.discovery.validation_sprint_runner.plan_validation_sprint`
+produces a deterministic, side-effect-free, advisory preflight that consults that governor and the
+fixture-backed learning ledger; `run_validation_sprint` does not read it, and it grants no execution or approval
+(see `docs/VALIDATION_SPRINT_PLAN.md`).
+
 Pre-integration & mutation gates: `evaluation.companyos.approval_ledger` governs
 simulation and fail-closed approval policy for all external mutations. Real world
 actions (publishing, live ads, customer outreach, payment execution) in

@@ -1,0 +1,16 @@
+{
+  "events": [
+    {
+      "action_taken": "deep_validate_product",
+      "candidate_id": "candidate-a",
+      "event_type": "product_validation",
+      "failure_reasons": [
+        "poor_margin"
+      ],
+      "learning_event_id": "fixture-prior-kill-candidate-a",
+      "outcome": "killed",
+      "owner_department": "intelligence",
+      "workspace_id": "default"
+    }
+  ]
+}
