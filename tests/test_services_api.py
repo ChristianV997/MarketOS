@@ -1,5 +1,6 @@
-"""Tests for api.routes.services — thin route wrappers over
-services.product_research/services.unit_economics (Phase 7)."""
+"""Tests for api.routes.services — thin route wrappers over service modules."""
+import logging
+
 import backend.core.persistence as pers
 import pytest
 from fastapi import FastAPI
@@ -143,10 +144,77 @@ class TestProfitStackAdvisorRoute:
 
 
 class TestServicesRouteNeverRaises:
-    def test_unexpected_failure_returns_error_dict_not_500(self, client, monkeypatch):
+    def test_unexpected_failure_returns_stable_safe_500(self, client, monkeypatch, caplog):
+        exception_text = "path=C:\\private\\sk-live-synthetic-redaction-canary"
+
         def _boom(*a, **k):
-            raise RuntimeError("unexpected")
+            raise RuntimeError(exception_text)
+
+        caplog.set_level(logging.ERROR)
         monkeypatch.setattr("services.product_research.audit.run_product_audit", _boom)
         resp = client.post("/api/services/product-audit", params={"product": "Widget"})
-        assert resp.status_code == 200  # the route itself never 500s
-        assert "error" in resp.json()
+        assert resp.status_code == 500
+        assert resp.json() == {"error": "service_unavailable"}
+        assert exception_text not in resp.text
+        assert exception_text not in caplog.text
+
+    @pytest.mark.parametrize(
+        ("path", "params", "target"),
+        [
+            (
+                "/api/services/product-audit",
+                {"product": "Widget"},
+                "services.product_research.audit.run_product_audit",
+            ),
+            (
+                "/api/services/ecommerce-operator",
+                {"product": "Widget"},
+                "services.ecommerce_operator.experiment.create_commerce_experiment",
+            ),
+            (
+                "/api/services/unit-economics",
+                {"product": "Widget", "cost": 10.0, "price": 40.0},
+                "services.unit_economics.analyzer.run_unit_economics",
+            ),
+            (
+                "/api/services/creative-growth",
+                {"product": "Widget"},
+                "services.creative_growth.plan.build_creative_growth_plan",
+            ),
+            (
+                "/api/services/customer-intelligence",
+                {"business_type": "clinic"},
+                "services.customer_intelligence.sprint.build_customer_intelligence_sprint",
+            ),
+            (
+                "/api/services/digital-product",
+                {"offer_name": "Playbook"},
+                "services.digital_products.plan.build_digital_product_plan",
+            ),
+            (
+                "/api/services/sales-automation",
+                {"vertical": "car_sales"},
+                "services.sales_automation.simulate.run_sales_bot_simulation",
+            ),
+            (
+                "/api/services/profit-stack-advisor",
+                {"business_name": "Own Store"},
+                "services.profit_stack_advisor.advisor.run_profit_stack_advisor",
+            ),
+        ],
+    )
+    def test_all_service_sinks_redact_exception_details(self, client, monkeypatch, caplog, path, params, target):
+        exception_text = "C:\\internal\\source.py:99 sk-live-synthetic-redaction-canary"
+
+        def _boom(*a, **k):
+            raise RuntimeError(exception_text)
+
+        caplog.set_level(logging.ERROR)
+        monkeypatch.setattr(target, _boom)
+
+        resp = client.post(path, params=params)
+
+        assert resp.status_code == 500
+        assert resp.json() == {"error": "service_unavailable"}
+        assert exception_text not in resp.text
+        assert exception_text not in caplog.text
