@@ -9,16 +9,21 @@ Enforces strict source-adoption rules:
 - Rollback deactivation strategy requirement
 - Lifecycle progression integrity
 - Dossier consistency
+- Policy-based parsed URL validation & raw payload rejection (RFC 3986 / WHATWG compliant)
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+from urllib.parse import unquote, urlsplit
 
 _HEX_40_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+_HOST_LABEL_RE = re.compile(r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$")
+
 _SECRET_KEY_NAMES = frozenset({
     "api_key", "apikey", "access_token", "authorization", "auth_token",
     "password", "private_key", "secret", "secret_key", "token", "credential",
@@ -34,6 +39,16 @@ _SECRET_SHAPED_VALUE = re.compile(
     r"|bearer [A-Za-z0-9._-]{10,}"
     r")"
 )
+
+RAW_CONTENT_HOSTS = frozenset({
+    "raw.githubusercontent.com",
+    "gist.githubusercontent.com",
+})
+
+REPOSITORY_HOSTS = frozenset({
+    "github.com",
+    "gitlab.com",
+})
 
 RESTRICTIVE_LICENSES = frozenset({
     "agpl-3.0", "agpl", "gpl-3.0", "gpl", "elv2", "elastic-license-2.0",
@@ -60,6 +75,224 @@ VALID_CLASSES = frozenset({
 VALID_INTEGRATION_MODES = frozenset({
     "fixture", "manual-import", "dry-run", "read-only-live", "mutation-capable"
 })
+
+
+def sanitize_url_for_error(url: str) -> str:
+    """Sanitize URL before echoing into error messages.
+
+    Strips user credentials, query strings, fragments, secret patterns, and control characters
+    to prevent credential leakage or injection into validation errors.
+    """
+    if not url:
+        return ""
+    clean = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", str(url).strip())
+    try:
+        parsed = urlsplit(clean)
+        scheme = parsed.scheme.lower()
+        if scheme in ("http", "https"):
+            host = parsed.hostname or ""
+            port_str = f":{parsed.port}" if parsed.port and parsed.port not in (80, 443) else ""
+            path = parsed.path
+            path = _SECRET_SHAPED_VALUE.sub("<redacted>", path)
+            safe = f"{scheme}://{host}{port_str}{path}"
+            return safe[:100] + ("..." if len(safe) > 100 else "")
+        elif scheme == "file":
+            safe_path = _SECRET_SHAPED_VALUE.sub("<redacted>", parsed.path)
+            safe = f"file://{safe_path}"
+            return safe[:100]
+    except Exception:
+        pass
+    no_query = clean.split("?")[0].split("#")[0]
+    no_user = re.sub(r"://[^@]+@", "://", no_query)
+    no_sec = _SECRET_SHAPED_VALUE.sub("<redacted>", no_user)
+    return no_sec[:100]
+
+
+def is_repository_source(source_url: str) -> bool:
+    """True if source_url uses an exact official repository host.
+
+    Uses parsed hostname validation instead of substring checks to prevent lookalike
+    host or path/query bypasses (CodeQL CWE-20 remediation). A single trailing DNS
+    root dot is normalized, but subdomains and malformed authorities are not trusted.
+    """
+    if not source_url or not isinstance(source_url, str):
+        return False
+    try:
+        parsed = urlsplit(source_url.strip())
+    except Exception:
+        return False
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False
+    if parsed.username or parsed.password or "@" in parsed.netloc:
+        return False
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    if port is not None and (port <= 0 or port > 65535):
+        return False
+    raw_hostname = parsed.hostname or ""
+    if raw_hostname.endswith(".."):
+        return False
+    hostname = raw_hostname.lower()
+    if hostname.endswith("."):
+        hostname = hostname[:-1]
+    if not hostname:
+        return False
+    return hostname in REPOSITORY_HOSTS
+
+
+def validate_source_url(cid: str, source_url: str) -> List[str]:
+    """Validate a catalog source or license URL against security policy.
+
+    Enforces:
+    - Non-empty, non-placeholder URL
+    - Safe standard schemes (http, https, file)
+    - Rejection of control characters and backslashes in authority
+    - Rejection of user credentials (userinfo) in authority
+    - Well-formed DNS / IP hostnames
+    - Rejection of deceptive lookalike hosts
+    - Rejection of raw payload / raw content URLs (raw.githubusercontent.com, repo /raw/ paths)
+    """
+    errors: List[str] = []
+    if not source_url or not isinstance(source_url, str) or not source_url.strip():
+        errors.append(f"placeholder_source_url in {cid}")
+        return errors
+
+    clean_url = source_url.strip()
+    if "placeholder" in clean_url.lower():
+        errors.append(f"placeholder_source_url in {cid}")
+        return errors
+
+    # Reject control characters and newlines
+    if any(ord(c) < 32 or ord(c) == 127 for c in clean_url):
+        errors.append(f"malformed_source_url in {cid}: control characters prohibited")
+        return errors
+
+    # Reject backslash before or in authority (WHATWG host confusion mitigation)
+    authority_part = clean_url.split("?", 1)[0].split("#", 1)[0]
+    if "://" in authority_part:
+        _, after_scheme = authority_part.split("://", 1)
+        netloc_candidate = after_scheme.split("/", 1)[0]
+        if "\\" in netloc_candidate:
+            errors.append(f"malformed_source_url in {cid}: backslash in authority prohibited")
+            return errors
+    elif "\\" in authority_part:
+        errors.append(f"malformed_source_url in {cid}: backslash in authority prohibited")
+        return errors
+
+    try:
+        parsed = urlsplit(clean_url)
+    except (ValueError, Exception):
+        errors.append(f"malformed_source_url in {cid}: invalid URL syntax")
+        return errors
+
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https", "file"):
+        errors.append(f"unsupported_source_url_scheme in {cid}: {scheme}")
+        return errors
+
+    if scheme == "file":
+        unquoted = unquote(parsed.path)
+        if ".." in unquoted or "\\.." in unquoted:
+            errors.append(f"malformed_source_url in {cid}: directory traversal in file URL prohibited")
+        return errors
+
+    netloc = parsed.netloc
+    if not netloc:
+        errors.append(f"malformed_source_url in {cid}: missing network authority")
+        return errors
+
+    # Reject userinfo (credentials in authority)
+    if parsed.username or parsed.password or "@" in netloc:
+        errors.append(f"userinfo_in_source_url_rejected in {cid}: credentials in authority prohibited")
+        return errors
+
+    # Port validation
+    try:
+        port = parsed.port
+        if port is not None and (port <= 0 or port > 65535):
+            errors.append(f"malformed_source_url in {cid}: invalid port number")
+            return errors
+    except ValueError:
+        errors.append(f"malformed_source_url in {cid}: invalid port number")
+        return errors
+
+    raw_host = parsed.hostname
+    if not raw_host:
+        errors.append(f"malformed_source_url in {cid}: missing hostname")
+        return errors
+
+    # Reject percent-encoded hostnames or invalid colon placement
+    if "%" in raw_host or (":" in raw_host and not (netloc.startswith("[") and "]" in netloc)):
+        errors.append(f"malformed_source_url in {cid}: invalid characters in hostname")
+        return errors
+
+    if raw_host.endswith(".."):
+        errors.append(f"malformed_source_url in {cid}: multiple trailing hostname dots prohibited")
+        return errors
+
+    hostname = raw_host.lower()
+    if hostname.endswith("."):
+        hostname = hostname[:-1]
+    if hostname in (".", "..") or not hostname:
+        errors.append(f"malformed_source_url in {cid}: invalid hostname")
+        return errors
+
+    # Validate host labels or IP literals
+    if ":" in hostname:  # IPv6 literal
+        try:
+            ipaddress.IPv6Address(hostname)
+        except ValueError:
+            errors.append(f"malformed_source_url in {cid}: invalid IPv6 literal")
+            return errors
+    else:
+        labels = hostname.split(".")
+        if any(not _HOST_LABEL_RE.match(lbl) for lbl in labels):
+            errors.append(f"malformed_source_url in {cid}: invalid host label syntax")
+            return errors
+
+        last_lbl = labels[-1]
+        if last_lbl.isdigit():
+            try:
+                ipaddress.IPv4Address(hostname)
+            except ValueError:
+                errors.append(f"malformed_source_url in {cid}: invalid numeric host")
+                return errors
+
+    # Deceptive lookalike host check
+    for target in ("raw.githubusercontent.com", "github.com", "gitlab.com"):
+        if target in hostname:
+            if hostname != target:
+                errors.append(f"deceptive_source_host_rejected in {cid}: lookalike host '{hostname}' prohibited")
+                return errors
+
+    # Raw content / raw payload detection
+    is_raw = False
+    safe_disp = sanitize_url_for_error(clean_url)
+
+    if any(hostname == rch or hostname.endswith(f".{rch}") for rch in RAW_CONTENT_HOSTS):
+        is_raw = True
+
+    if not is_raw and is_repository_source(clean_url):
+        path_parts = [p for p in unquote(parsed.path).lower().split("/") if p]
+        if "github.com" in hostname:
+            if len(path_parts) >= 3 and path_parts[2] == "raw":
+                is_raw = True
+        elif "gitlab.com" in hostname:
+            if "raw" in path_parts:
+                is_raw = True
+
+    if not is_raw:
+        unquoted_path = unquote(parsed.path).lower()
+        unquoted_query = unquote(parsed.query).lower()
+        if "raw_payload" in unquoted_path or "raw_payload" in unquoted_query:
+            is_raw = True
+
+    if is_raw:
+        errors.append(f"raw_payload_url_rejected in {cid}: {safe_disp}")
+
+    return errors
 
 
 def _contains_credentials(val: Any) -> bool:
@@ -127,21 +360,17 @@ def validate_capability_record(item: Dict[str, Any], seen_ids: Set[str], prev_ci
         errors.append(f"missing_provenance in {cid}")
 
     source_url = str(item.get("official_source_url", "")).strip()
-    if not source_url or "placeholder" in source_url:
-        errors.append(f"placeholder_source_url in {cid}")
-
-    # Raw payload URL rejection
-    if "raw.githubusercontent.com" in source_url or "raw_payload" in source_url:
-        errors.append(f"raw_payload_url_rejected in {cid}: {source_url}")
+    url_errors = validate_source_url(cid, source_url)
+    errors.extend(url_errors)
 
     # 9. Pinned Commit SHA validation (Grok/xAI pinning model)
-    is_repo_source = any(host in source_url.lower() for host in ("github.com", "gitlab.com"))
+    is_repo = is_repository_source(source_url)
     commit_sha = item.get("commit_sha")
-    if is_repo_source:
+    if is_repo:
         if not commit_sha or str(commit_sha).strip() == "":
             errors.append(f"missing_commit_sha in {cid}: repository source must provide pinned commit_sha")
         elif not _HEX_40_RE.match(str(commit_sha).strip()):
-            errors.append(f"malformed_commit_sha in {cid}: commit_sha must be 40-character hex string, got '{commit_sha}'")
+            errors.append(f"malformed_commit_sha in {cid}: commit_sha must be 40-character hex string, got '{str(commit_sha)[:50]}'")
 
     # 10. License evidence & restrictive license rejection
     license_disp = str(item.get("license_reuse_disposition", "")).strip()
@@ -150,6 +379,10 @@ def validate_capability_record(item: Dict[str, Any], seen_ids: Set[str], prev_ci
 
     if not license_disp or not license_url:
         errors.append(f"missing_license in {cid}: license evidence or disposition missing")
+    elif license_url.lower() not in ("none", "n/a"):
+        lic_errors = validate_source_url(cid, license_url)
+        if lic_errors:
+            errors.extend(lic_errors)
 
     # Check restrictive license claims
     lic_lower = (license_disp + " " + licensing_status).lower()
@@ -252,7 +485,7 @@ def check_dossier_consistency(catalog: List[Dict[str, Any]], dossiers_dir: Path)
     for item in catalog:
         cid = item.get("capability_id", "")
         source_url = item.get("official_source_url", "")
-        if any(host in source_url.lower() for host in ("github.com", "gitlab.com")):
+        if is_repository_source(source_url):
             if cid not in dossier_files:
                 errors.append(f"missing_dossier: No dossier found for repository candidate '{cid}'")
             else:
@@ -290,6 +523,23 @@ def validate_catalog(path: str, dossiers_dir: Optional[str] = None) -> bool:
 
     print(f"Catalog validation passed successfully ({len(catalog)} capabilities verified).")
     return True
+
+
+__all__ = [
+    "RAW_CONTENT_HOSTS",
+    "REPOSITORY_HOSTS",
+    "REQUIRED_BASE_KEYS",
+    "RESTRICTIVE_LICENSES",
+    "VALID_CLASSES",
+    "VALID_INTEGRATION_MODES",
+    "check_dossier_consistency",
+    "is_repository_source",
+    "sanitize_url_for_error",
+    "validate_capability_record",
+    "validate_catalog",
+    "validate_catalog_data",
+    "validate_source_url",
+]
 
 
 if __name__ == "__main__":
