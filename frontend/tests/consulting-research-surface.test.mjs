@@ -103,10 +103,119 @@ test("keyboard stays in source order and source has no mutation client", async (
   assert.equal(moveSelection(order, "supplier", "Home"), "demand");
   const source = await readFile(new URL("../src/features/consulting-research-surface/components/ConsultingResearchSurface.tsx", import.meta.url), "utf8");
   const page = await readFile(new URL("../src/features/consulting-research-surface/ConsultingResearchSurfacePage.tsx", import.meta.url), "utf8");
+  const main = await readFile(new URL("../src/main.tsx", import.meta.url), "utf8");
   assert.match(source, /aria-live="polite"/);
   assert.match(source, /<table/);
   assert.match(source, /motion-reduce:transition-none/);
   assert.match(source, /overflow-x-auto/);
   assert.doesNotMatch(source, /method:\s*["']POST["']|fetch\(/);
   assert.doesNotMatch(page, /Shell|Sidebar/);
+  assert.match(page, /type="file"/);
+  assert.match(page, /Demo\/fixture — not live evidence/);
+  assert.match(page, /Reset demo fixture/);
+  assert.match(page, /Reset live request/);
+  assert.match(page, /Request live report/);
+  assert.doesNotMatch(page, /localStorage|sessionStorage|indexedDB/i);
+  assert.doesNotMatch(page, /workspace_id|workspaceId/);
+  assert.match(main, /path:\s*["']\/operator\/consulting-research["']/);
+  assert.match(main, /ConsultingResearchSurfacePage/);
+});
+
+test("market-research-service-v1 maps into surface model without live or launch authority", async () => {
+  const { mapMarketResearchReport } = await import("../src/features/consulting-research-surface/lib/mapMarketResearchReport.ts");
+  const sampleText = await readFile(
+    new URL("../src/features/consulting-research-surface/fixtures/market_research_report_sample.json", import.meta.url),
+    "utf8",
+  );
+  const sample = JSON.parse(sampleText);
+  const mapped = mapMarketResearchReport(sample);
+  assert.equal(mapped.ok, true);
+  if (!mapped.ok) return;
+  assert.equal(mapped.packet.version, "consulting-research-surface-v1");
+  assert.equal(mapped.packet.live_validated, false);
+  assert.equal(mapped.packet.launch_authorized, false);
+  assert.equal(mapped.packet.draft_only, true);
+  const adapted = adaptResearchSurface(mapped.packet);
+  assert.equal(adapted.rejected, false);
+  assert.equal(adapted.model.launch_authorized, false);
+  assert.equal(adapted.model.live_validated, false);
+  assert.ok(adapted.model.sections.length >= 1);
+  assert.ok(adapted.model.sections.every((section) => section.rows.every((row) => row.evidence_class !== "live_validated")));
+  const view = viewOf(mapped.packet);
+  assert.notEqual(view.state, "success");
+  assert.equal(view.launchAuthorized, false);
+});
+
+test("local report ingest rejects invalid secret oversized and mismatched contracts without echoing payloads", async () => {
+  const {
+    ingestLocalResearchReportJson,
+    localReportRejectionMessage,
+    MAX_LOCAL_RESEARCH_REPORT_BYTES,
+  } = await import("../src/features/consulting-research-surface/lib/loadLocalResearchReport.ts");
+
+  const badJson = ingestLocalResearchReportJson("{not-json");
+  assert.equal(badJson.ok, false);
+  if (!badJson.ok) {
+    assert.equal(badJson.reason, "invalid_json");
+    assert.doesNotMatch(localReportRejectionMessage(badJson.reason), /\{not-json/);
+  }
+
+  const secret = ingestLocalResearchReportJson(JSON.stringify({
+    version: "consulting-research-surface-v1",
+    engagement_id: "e1",
+    display_name: "leak sk-live-abcdefghijklmnopqrstuv",
+    sections: [],
+  }));
+  assert.equal(secret.ok, false);
+  if (!secret.ok) {
+    assert.equal(secret.reason, "prohibited_or_secret_shaped");
+    assert.doesNotMatch(localReportRejectionMessage(secret.reason), /sk-live-/);
+  }
+
+  const mismatch = ingestLocalResearchReportJson(JSON.stringify({ report_version: "other-v1", candidate_id: "x" }));
+  assert.equal(mismatch.ok, false);
+  if (!mismatch.ok) assert.equal(mismatch.reason, "unsupported_contract");
+
+  const sampleText = await readFile(
+    new URL("../src/features/consulting-research-surface/fixtures/market_research_report_sample.json", import.meta.url),
+    "utf8",
+  );
+  const ok = ingestLocalResearchReportJson(sampleText);
+  assert.equal(ok.ok, true);
+  if (ok.ok) assert.equal(ok.source, "market-research-service-v1");
+
+  const surfaceOk = ingestLocalResearchReportJson(JSON.stringify(buildSurfaceFixture()));
+  assert.equal(surfaceOk.ok, true);
+  if (surfaceOk.ok) assert.equal(surfaceOk.source, "consulting-research-surface-v1");
+
+  assert.ok(MAX_LOCAL_RESEARCH_REPORT_BYTES <= 512 * 1024);
+  const { loadLocalResearchReportFile } = await import("../src/features/consulting-research-surface/lib/loadLocalResearchReport.ts");
+  const huge = {
+    name: "huge.json",
+    size: MAX_LOCAL_RESEARCH_REPORT_BYTES + 1,
+    text: async () => sampleText,
+  };
+  const rejected = await loadLocalResearchReportFile(huge);
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) assert.equal(rejected.reason, "file_too_large");
+});
+
+test("loading and error states stay honest on the page contract", async () => {
+  const loading = composeResearchSurface({
+    loading: true,
+    errorMessage: null,
+    model: adaptResearchSurface(buildSurfaceFixture()).model,
+    rejected: false,
+    selectedSectionId: null,
+  });
+  assert.equal(loading.state, "loading");
+  const errored = composeResearchSurface({
+    loading: false,
+    errorMessage: "Selected report was rejected. Payload not shown.",
+    model: adaptResearchSurface(buildSurfaceFixture()).model,
+    rejected: false,
+    selectedSectionId: null,
+  });
+  assert.equal(errored.state, "error");
+  assert.match(errored.message, /Payload not shown/);
 });

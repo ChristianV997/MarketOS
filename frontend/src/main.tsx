@@ -20,6 +20,7 @@ import FirstPhaseEvidenceCockpitPage from "./pages/FirstPhaseEvidenceCockpit";
 import OwnerResearchPortfolioPage from "./features/owner-research-portfolio/OwnerResearchPortfolioPage";
 import ClientProfileOnboardingPage from "./features/client-crm-profile/ClientProfileOnboardingPage";
 import { ApprovalLedgerReviewPage } from "./features/companyos-approval-ledger-review";
+import { ConsultingResearchSurfacePage } from "./features/consulting-research-surface";
 import { initPosthog } from "./lib/posthog";
 
 initPosthog(); // no-op unless VITE_POSTHOG_KEY is set — see lib/posthog.ts
@@ -45,6 +46,7 @@ const router = createBrowserRouter([
       { path: "/operator/research", element: <OwnerResearchPortfolioPage /> },
       { path: "/research", element: <OwnerResearchPortfolioPage /> },
       { path: "/operator/approval-ledger", element: <ApprovalLedgerReviewPage /> },
+      { path: "/operator/consulting-research", element: <ConsultingResearchSurfacePage /> },
     ],
   },
   {
