@@ -23,7 +23,9 @@ Event spine & replay identity: `backend/contracts/events.py` defines the canonic
 `Event` envelope with deterministic `replay_hash()`. Replay sequence validation,
 hash verification, and live-authority exclusion are owned by
 `backend/events/replay_certification.py`. Replay stores and journals are
-temporary adapters pending `EventRepository`.
+temporary adapters pending `EventRepository`. The live `/ws` stream is
+operator-gated in `api/ws.py` before `accept()`: identity comes only from the
+`bearer.` subprotocol, never from a query string or `Authorization` header.
 
 Export & isolation contract: `evaluation.trustos.client_workspace_isolation` is
 the canonical export boundary for client-facing artifacts (`check_workspace_leakage`).
