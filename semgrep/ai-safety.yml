@@ -40,3 +40,43 @@ rules:
               regex: "^(create_campaign|create_ad_group|create_ad|create_order|create_cart|fulfill_order|publish_bundle|publish|charge|launch|delete)$"
     paths:
       include: ["**/backend/**", "**/connectors/**", "**/orchestrator/**"]
+
+  - id: marketos-fastapi-raw-exception-detail
+    languages: [python]
+    message: Do not expose exception text in a FastAPI response; return a stable error code and log the exception server-side.
+    severity: WARNING
+    metadata:
+      category: security
+      confidence: HIGH
+      technology: [fastapi]
+      references:
+        - https://fastapi.tiangolo.com/tutorial/handling-errors/
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: raise HTTPException(..., detail=$DETAIL, ...)
+              - metavariable-pattern:
+                  metavariable: $DETAIL
+                  patterns:
+                    - pattern-either:
+                        - pattern: str($EXCEPTION)
+                        - pattern: repr($EXCEPTION)
+          - patterns:
+              - pattern: raise HTTPException(..., detail=$DETAIL, ...)
+              - metavariable-regex:
+                  metavariable: $DETAIL
+                  regex: >-
+                    ^f["'].*\{(?:e|err|exc|exception|error)\b
+          - pattern: 'return {"error": str($EXCEPTION), ...}'
+          - pattern: 'return {"detail": str($EXCEPTION), ...}'
+          - pattern: 'return {"message": str($EXCEPTION), ...}'
+          - pattern-regex: >-
+              return\s+f["'].*\{(?:e|err|exc|exception|error)\b
+          - pattern: 'JSONResponse({"error": str($EXCEPTION), ...}, ...)'
+          - pattern: 'JSONResponse({"detail": str($EXCEPTION), ...}, ...)'
+          - pattern: 'JSONResponse({"message": str($EXCEPTION), ...}, ...)'
+          - pattern: 'JSONResponse(..., content={"error": str($EXCEPTION), ...}, ...)'
+          - pattern: 'JSONResponse(..., content={"detail": str($EXCEPTION), ...}, ...)'
+          - pattern: 'JSONResponse(..., content={"message": str($EXCEPTION), ...}, ...)'
+    paths:
+      include: ["api/**", "backend/api.py", "backend/sidecars/**", "semgrep/ai-safety.py"]
