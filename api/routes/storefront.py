@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import html
 import logging
-from urllib.parse import urlencode
+import os
+import re
+from html.parser import HTMLParser
+from urllib.parse import urlencode, urlparse, urlsplit
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -40,10 +43,146 @@ _PAGE_STYLE = """
   footer{color:#9aa3ad;font-size:12px;padding:26px 20px;text-align:center}
 """
 
+_ALLOWED_TAGS = {"p", "br", "ul", "ol", "li", "strong", "em", "b", "i"}
+_DROPPED_TAGS = {"script", "style", "iframe", "object", "embed", "svg", "math", "noscript"}
+_STRIPE_CHECKOUT_NETLOCS = {"checkout.stripe.com", "checkout.stripe.com:443"}
+_STRIPE_CHECKOUT_PATH = re.compile(r"/(?:c/)?pay/(?P<session_id>[A-Za-z0-9_-]+)$")
+_STRIPE_SESSION_ID = re.compile(r"cs_[A-Za-z0-9_-]{4,200}$")
+_STOREFRONT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
+
+
+def _attr(value: object) -> str:
+    return html.escape(str(value), quote=True)
+
+
+class _DescriptionHTML(HTMLParser):
+    """Allow a small set of tags and no attributes. Drop script-like bodies."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._skip = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag in _DROPPED_TAGS:
+            self._skip += 1
+            return
+        if self._skip or tag not in _ALLOWED_TAGS:
+            return
+        self._parts.append("<br>" if tag == "br" else f"<{tag}>")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in _DROPPED_TAGS:
+            if self._skip:
+                self._skip -= 1
+            return
+        if self._skip or tag not in _ALLOWED_TAGS or tag == "br":
+            return
+        self._parts.append(f"</{tag}>")
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip:
+            self._parts.append(html.escape(data, quote=True))
+
+    def render(self) -> str:
+        return "".join(self._parts)
+
+
+def _safe_description(value: object) -> str:
+    text = value if isinstance(value, str) else ""
+    parser = _DescriptionHTML()
+    try:
+        parser.feed(text)
+        parser.close()
+    except Exception:
+        return html.escape(text, quote=True)
+    return parser.render()
+
 
 def _utm_query(params: dict) -> str:
-    utm = {k: v for k, v in params.items() if k.startswith("utm_")}
+    utm = {k: v for k, v in params.items() if isinstance(k, str) and k.startswith("utm_") and isinstance(v, str)}
     return urlencode(utm) if utm else ""
+
+
+def _public_base():
+    raw = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").strip()
+    parts = urlsplit(raw)
+    if parts.scheme not in {"http", "https"} or not parts.netloc or parts.username or parts.password:
+        return None
+    if any(ch in parts.netloc for ch in "\\@ \t\r\n"):
+        return None
+    return parts
+
+
+def _safe_dry_run_checkout_target(value: object, *, brand_id: str, product_id: str) -> str | None:
+    """Rebuild a dry-run target from the local allowlisted origin."""
+    if not isinstance(value, str) or not value or any(ch in value for ch in "\r\n\t\\"):
+        return None
+    parts = urlsplit(value)
+    if parts.username or parts.password or parts.fragment:
+        return None
+    netloc = parts.netloc
+    if not netloc or any(ch in netloc for ch in "\\@ "):
+        return None
+    base = _public_base()
+    expected_path = f"/s/{brand_id}/{product_id}"
+    if (
+        base is None
+        or parts.scheme != base.scheme
+        or netloc.lower() != base.netloc.lower()
+        or parts.path != expected_path
+        or parts.query != "purchased=1"
+        or "//" in parts.path
+    ):
+        return None
+    return f"{base.scheme}://{base.netloc}{expected_path}?purchased=1"
+
+
+def _allowed_live_checkout_netlocs() -> set[str]:
+    """Return the explicitly configured HTTPS checkout hosts."""
+    configured = os.getenv("STRIPE_CHECKOUT_ALLOWED_HOSTS", "")
+    hosts = {host.strip().lower() for host in configured.split(",") if host.strip()}
+    return hosts or _STRIPE_CHECKOUT_NETLOCS
+
+
+def _safe_live_checkout_target(
+    value: object, session_id: object | None = None
+) -> str | None:
+    """Validate and preserve the URL returned by the trusted checkout provider."""
+    if not isinstance(value, str):
+        return None
+    if not value or any(ch in value for ch in "\r\n\t\\"):
+        return None
+    parts = urlsplit(value)
+    if (
+        parts.scheme != "https"
+        or not parts.netloc
+        or parts.netloc.lower() not in _allowed_live_checkout_netlocs()
+        or parts.username
+        or parts.password
+        or parts.query
+    ):
+        return None
+    match = _STRIPE_CHECKOUT_PATH.fullmatch(parts.path)
+    if match is None:
+        return None
+    path_session_id = match.group("session_id")
+    if session_id is None:
+        session_id = path_session_id
+    if not isinstance(session_id, str) or not _STRIPE_SESSION_ID.fullmatch(session_id):
+        return None
+    if path_session_id != session_id:
+        return None
+    return value
+
+
+def _safe_checkout_target(value: object, *, dry_run: bool, brand_id: str, product_id: str) -> str | None:
+    """Return a rebuilt redirect target, or None."""
+    if dry_run:
+        return _safe_dry_run_checkout_target(value, brand_id=brand_id, product_id=product_id)
+    return _safe_live_checkout_target(value)
 
 
 @router.get("/s/{brand_id}", response_class=HTMLResponse)
@@ -58,7 +197,7 @@ def brand_page(brand_id: str) -> HTMLResponse:
     entries = [e for e in product_catalog.for_brand(brand_id, status=STATUS_LIVE)
                if e.stock_ok]
     cards = "".join(
-        f'<a class="card" href="/s/{brand_id}/{e.product_id}">'
+        f'<a class="card" href="/s/{_attr(brand_id)}/{_attr(e.product_id)}">'
         f'<div class="t">{html.escape(e.title)}</div>'
         f'<div class="price">${e.retail_price:.2f}</div></a>'
         for e in entries
@@ -85,7 +224,9 @@ def product_page(brand_id: str, product_id: str, request: Request) -> HTMLRespon
 
     bullets = "".join(f"<li>{html.escape(str(b))}</li>" for b in entry.bullets)
     utm = _utm_query(dict(request.query_params))
-    checkout_href = f"/s/{brand_id}/{product_id}/checkout" + (f"?{utm}" if utm else "")
+    checkout_href = f"/s/{_attr(brand_id)}/{_attr(product_id)}/checkout"
+    if utm:
+        checkout_href = f"{checkout_href}?{html.escape(utm, quote=True)}"
 
     if entry.stock_ok:
         cta = f'<a class="buy" href="{checkout_href}">Buy now — ${entry.retail_price:.2f}</a>'
@@ -93,12 +234,12 @@ def product_page(brand_id: str, product_id: str, request: Request) -> HTMLRespon
         cta = '<div class="oos">Temporarily out of stock</div>'
 
     body = (
-        f"<header><div class='brand'><a href='/s/{brand_id}' style='color:inherit;"
+        f"<header><div class='brand'><a href='/s/{_attr(brand_id)}' style='color:inherit;"
         f"text-decoration:none'>{html.escape(brand.name)}</a></div>"
         f"<div class='tagline'>{html.escape(brand.tagline)}</div></header>"
         f"<main><h1>{html.escape(entry.title)}</h1>"
         f"<div class='price'>${entry.retail_price:.2f}</div>"
-        f"{entry.description_html}"
+        f"{_safe_description(entry.description_html)}"
         f"<ul>{bullets}</ul>{cta}</main>"
         f"<footer>{html.escape(brand.name)} — ships direct from our fulfillment partners</footer>"
     )
@@ -113,13 +254,77 @@ def start_checkout(brand_id: str, product_id: str, request: Request):
     fires exclusively from the signed checkout.session.completed webhook
     (api/routes/webhooks.py), never from this request completing.
     """
+    from backend.commerce.brands import brand_registry
+    from backend.commerce.catalog import STATUS_LIVE, product_catalog
     from backend.commerce.checkout import create_checkout_session
 
+    # Route identifiers are later reflected into the deterministic dry-run
+    # return URL.  Keep that URL construction independent of punctuation or
+    # delimiter characters supplied through the path.
+    if _STOREFRONT_ID.fullmatch(brand_id) is None or _STOREFRONT_ID.fullmatch(product_id) is None:
+        return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=404)
+    brand = brand_registry.get(brand_id)
+    entry = product_catalog.get(product_id)
+    if (
+        brand is None
+        or not brand.active
+        or entry is None
+        or entry.brand_id != brand.brand_id
+        or entry.status != STATUS_LIVE
+    ):
+        return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=404)
+    # These identifiers come from the canonical registries, not directly
+    # from the request path, before they cross into the checkout adapter.
+    safe_brand_id = brand.brand_id
+    safe_product_id = entry.product_id
+
     utm = {k: v for k, v in request.query_params.items() if k.startswith("utm_")}
-    result = create_checkout_session(brand_id, product_id, qty=1, utm=utm)
+    result = create_checkout_session(safe_brand_id, safe_product_id, qty=1, utm=utm)
     if result.get("status") != "ok":
         return HTMLResponse(
-            f"<h1>Checkout unavailable</h1><p>{html.escape(result.get('error', ''))}</p>",
+            f"<h1>Checkout unavailable</h1><p>{html.escape(str(result.get('error', '')))}</p>",
             status_code=409,
         )
-    return RedirectResponse(url=result["url"], status_code=303)
+    dry_run = bool(result.get("dry_run"))
+    target = (
+        _safe_dry_run_checkout_target(result.get("url"), brand_id=safe_brand_id, product_id=safe_product_id)
+        if dry_run
+        else _safe_live_checkout_target(
+            result.get("url"), result.get("session_id")
+        )
+    )
+    if target is None:
+        return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=409)
+
+    # Validate the final redirect immediately before handing it to Starlette.
+    # The builder above reconstructs the target, but this second guard keeps
+    # the redirect sink independent of route/provider taint and documents the
+    # only two allowed URL contracts.
+    target_parts = urlparse(target)
+    if dry_run:
+        base = _public_base()
+        if (
+            base is None
+            or target_parts.scheme != base.scheme
+            or target_parts.netloc.lower() != base.netloc.lower()
+            or target_parts.username
+            or target_parts.password
+            or target_parts.fragment
+            or target_parts.query != "purchased=1"
+        ):
+            return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=409)
+    else:
+        if (
+            target_parts.scheme != "https"
+            or target_parts.netloc.lower() not in _allowed_live_checkout_netlocs()
+            or target_parts.username
+            or target_parts.password
+            or target_parts.query
+            or (
+                _STRIPE_CHECKOUT_PATH.fullmatch(target_parts.path) is None
+                or _STRIPE_CHECKOUT_PATH.fullmatch(target_parts.path).group("session_id")
+                != result.get("session_id")
+            )
+        ):
+            return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=409)
+    return RedirectResponse(url=target, status_code=303)
