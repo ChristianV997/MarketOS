@@ -48,11 +48,15 @@ tick, which forces `SignalEngine.get(force_refresh=True)` — so as long as the
 orchestrator is running (see Compute topology above), these connectors are
 already being queried on a real cadence, not just once at startup.
 
-**Orphaned, not wired in** (documented for a future decision, not part of
-the live pipeline): `core/sensors/tiktok_client.py` (`RAPIDAPI_KEY`) and
-`connectors/tiktok_connector.py` (`TIKTOK_RESEARCH_TOKEN`) are a second,
-unused TikTok client pair from an earlier iteration — `backend/adapters/
-tiktok_organic.py` above is the one the live pipeline actually calls.
+**Retired legacy clients** (not a second discovery authority): `core/sensors/tiktok_client.py`
+and `connectors/tiktok_connector.py` stay importable so existing offline callers keep
+working. They are not registered with `SignalEngine` or `discovery_registry`.
+`tiktok_client.fetch_trending` always returns an empty list and does not read
+credentials or perform I/O, so `core/jobs/daily_research.py` still imports it and
+returns an empty top-10. `tiktok_connector.fetch_trending` returns its checked-in
+fixture only. Do not configure a RapidAPI or Research API credential for these
+modules. The live discovery connector remains `backend/adapters/tiktok_organic.py`
+in the table above. Any future external TikTok call stays behind the Approval Ledger.
 
 ## What stays dry-run regardless of uptime
 

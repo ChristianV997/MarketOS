@@ -1,15 +1,10 @@
-"""tiktok_connector — stub/live TikTok Research API connector.
+"""tiktok_connector — offline fixture for the legacy research-shaped payload.
 
-Returns raw trend payloads shaped like TikTok Research API responses.
-Swap _fetch_live() for a real HTTP call when credentials are available.
-
-Environment:
-    TIKTOK_RESEARCH_TOKEN  Bearer token for TikTok Research API (optional).
+Live Research API calls and credential reads were retired. ``fetch_trending``
+returns the checked-in fixture only. It is not a discovery source. The
+registered adapter is ``backend.adapters.tiktok_organic``.
 """
 from __future__ import annotations
-import os
-
-_ACCESS_TOKEN = os.getenv("TIKTOK_RESEARCH_TOKEN", "")
 
 _STUB: list[dict] = [
     {
@@ -70,15 +65,6 @@ _STUB: list[dict] = [
 ]
 
 
-def _fetch_live(limit: int) -> list[dict]:
-    raise NotImplementedError("TikTok Research API integration not yet configured")
-
-
 def fetch_trending(limit: int = 20) -> list[dict]:
-    """Return raw trend items. Falls back to stub when unconfigured."""
-    if _ACCESS_TOKEN:
-        try:
-            return _fetch_live(limit)
-        except Exception:
-            pass
+    """Return checked-in fixture items. Never calls the network."""
     return _STUB[:limit]
