@@ -1,9 +1,12 @@
 """api.routes.portfolio — portfolio allocations and ranked product opportunities."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Query
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/portfolio")
@@ -15,8 +18,16 @@ def portfolio():
             "allocations": get_allocations(),
             "top_products": top_products(n=5),
         }
-    except Exception:
-        return {"allocations": {}, "top_products": []}
+    except Exception as exc:
+        # Keep the response shape bounded and explicit without reflecting an
+        # exception message, path, or other implementation detail to callers.
+        logger.error("portfolio_allocation_unavailable error_type=%s", type(exc).__name__)
+        return {
+            "status": "unavailable",
+            "error": "portfolio_unavailable",
+            "allocations": {},
+            "top_products": [],
+        }
 
 
 @router.get("/opportunities")
@@ -89,7 +100,19 @@ def opportunities(limit: int = Query(default=20, ge=1, le=100)):
             "opportunities": results,
         }
     except Exception as exc:
-        return {"count": 0, "opportunities": [], "error": str(exc)}
+        # An unavailable calculation is not an empty successful ranking.  The
+        # stable code is safe for clients; only the exception type is retained
+        # in the server log, never its message or traceback.
+        logger.error("opportunities_unavailable error_type=%s", type(exc).__name__)
+        return {
+            "status": "unavailable",
+            "error": "opportunities_unavailable",
+            "count": 0,
+            "calibrated": False,
+            "top_hooks": [],
+            "top_angles": [],
+            "opportunities": [],
+        }
 
 
 __all__ = ["router"]
