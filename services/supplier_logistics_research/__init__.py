@@ -9,6 +9,7 @@ feasibility scorer or a logistics authority, and never contacts a live
 provider, supplier, or payment/shipping system.
 """
 from .controls import NegativeControlError, is_verified
+from .bridge import build_offer_from_supplier_evidence, build_report_from_supplier_evidence
 from .report import build_supplier_logistics_report
 from .schemas import (
     SCHEMA,
@@ -33,6 +34,8 @@ __all__ = [
     "NegativeControlError",
     "is_verified",
     "build_supplier_logistics_report",
+    "build_offer_from_supplier_evidence",
+    "build_report_from_supplier_evidence",
     "CandidateBoundSupplierIdentity",
     "CustomsDutyTaxProfile",
     "FieldEvidence",
