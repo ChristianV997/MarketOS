@@ -585,6 +585,7 @@ def run_colab_benchmark_matrix(runs: int = 3) -> dict[str, Any]:
         "execution_location": "google_colab" if colab_info["available"] else "local_workstation_executed",
         "benchmark_runs_per_path": runs,
         "zero_secrets": True,
+        "offline_credential_free": True,
         "zero_network_calls": True,
         "paths_tested": len(matrix_results),
         "all_deterministic": all(r["deterministic_bit_identity"] for r in matrix_results),
@@ -592,20 +593,24 @@ def run_colab_benchmark_matrix(runs: int = 3) -> dict[str, Any]:
     }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="Emit JSON report")
     parser.add_argument("--colab-matrix", action="store_true", help="Run bounded synthetic Colab benchmark matrix")
     parser.add_argument("--runs", type=int, default=3, help="Benchmark runs per path (default: 3)")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.colab_matrix:
         report = run_colab_benchmark_matrix(runs=args.runs)
         if args.json:
             print(json.dumps(report, indent=2, sort_keys=True))
         else:
-            print(f"Colab Benchmark Matrix (location: {report['execution_location']}, Colab compute: {report['colab_compute']['status']})")
-            print(f"Zero secrets: {report['zero_secrets']}, All deterministic: {report['all_deterministic']}")
+            location_str = str(report.get("execution_location", "unknown"))
+            colab_status = str(report.get("colab_compute", {}).get("status", "unavailable"))
+            print(f"Colab Benchmark Matrix (location: {location_str}, Colab compute: {colab_status})")
+            credential_free_status = "verified" if bool(report.get("zero_secrets")) else "unverified"
+            deterministic_status = "all_deterministic" if bool(report.get("all_deterministic")) else "non_deterministic"
+            print(f"Offline credential-free: {credential_free_status}, Deterministic: {deterministic_status}")
             print("-" * 70)
             for r in report["matrix"]:
                 print(f"{r['path_id']:<35} {r['status']:<12} avg={r['avg_ms']:>6.3f}ms  bit_identity={r['deterministic_bit_identity']}")

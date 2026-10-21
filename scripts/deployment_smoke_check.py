@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -35,8 +36,39 @@ def _env_file(path: str | None) -> dict[str, str]:
     return values
 
 
+def _safe_url_value(url_str: str) -> str:
+    try:
+        parts = urllib.parse.urlsplit(url_str.strip())
+        if parts.scheme and parts.netloc:
+            netloc = parts.netloc
+            if "@" in netloc:
+                netloc = netloc.split("@", 1)[1]
+            return urllib.parse.urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+    except Exception:
+        return "[redacted-url]"
+    return url_str
+
+
 def _safe_value(name: str, value: str) -> str:
-    return "<set>" if value and name not in {"ALLOWED_ORIGINS", "VITE_API_BASE_URL"} else value
+    if not value:
+        return ""
+    if name in {"ALLOWED_ORIGINS", "VITE_API_BASE_URL"}:
+        return _safe_url_value(value)
+    return "<set>"
+
+
+def _sanitize_dict_response(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        return {
+            str(k): _sanitize_dict_response(v)
+            for k, v in payload.items()
+            if not re.search(r"(?:secret|token|password|api[_-]?key|credential)", str(k), re.I)
+        }
+    if isinstance(payload, list):
+        return [_sanitize_dict_response(item) for item in payload]
+    if isinstance(payload, str) and payload.startswith(("http://", "https://")):
+        return _safe_url_value(payload)
+    return payload
 
 
 def _under_artifacts(value: str) -> bool:
@@ -103,14 +135,20 @@ def build_report(*, environ: dict[str, str] | None = None, env_file: str | None 
     bad_paths = [name for name, value in paths.items() if value and not _under_artifacts(value)]
     report["checks"].append({"name": "artifact_paths", "status": "passed" if not bad_paths else "failed", "paths": {name: _safe_value(name, value) for name, value in paths.items()}, "invalid": bad_paths})
     if bad_paths: report["status"] = "failed"
-    forbidden = contract.get("forbidden_frontend_secret_names", [])
+    forbidden = contract.get("forbidden_frontend_variable_names") or contract.get("forbidden_frontend_secret_names", [])
     frontend_files = list((ROOT / "frontend").glob(".env*"))
-    leaked_names = []
+    leaked_names: list[str] = []
     for file in frontend_files:
         text = file.read_text(encoding="utf-8", errors="ignore")
         leaked_names.extend(name for name in forbidden if re.search(rf"\b{re.escape(name)}\b", text))
-    report["checks"].append({"name": "frontend_secret_names", "status": "passed" if not leaked_names else "failed", "forbidden_names_found": sorted(set(leaked_names))})
-    if leaked_names: report["status"] = "failed"
+    unique_leaked = sorted(set(leaked_names))
+    report["checks"].append({
+        "name": "frontend_secret_names",
+        "status": "passed" if not unique_leaked else "failed",
+        "forbidden_variable_count": len(unique_leaked),
+        "forbidden_names_found": unique_leaked,
+    })
+    if unique_leaked: report["status"] = "failed"
     required_files = [
         "deploy/mvp/marketos.mvp.json",
         "frontend/package.json",
@@ -130,11 +168,13 @@ def build_report(*, environ: dict[str, str] | None = None, env_file: str | None 
         for endpoint in endpoints:
             try:
                 response, headers = _get_json_response(backend_url, endpoint)
-                endpoint_results.append({"endpoint": endpoint, "status": "passed", "response": response, "request_id_header": bool(headers.get("x-request-id"))})
+                clean_resp = _sanitize_dict_response(response)
+                endpoint_results.append({"endpoint": endpoint, "status": "passed", "response": clean_resp, "request_id_header": bool(headers.get("x-request-id"))})
             except (OSError, ValueError, urllib.error.URLError) as exc: endpoint_results.append({"endpoint": endpoint, "status": "failed", "detail": type(exc).__name__})
         try:
             blocked, headers = _get_json_response(backend_url, "/api/commerce-mvp/public-run", method="POST", body={"query": "smoke", "allow_public_network": False, "event_target": "none"})
-            endpoint_results.append({"endpoint": "/api/commerce-mvp/public-run", "status": "passed" if blocked.get("status") == "blocked" else "failed", "response": {"status": blocked.get("status"), "read_only": blocked.get("read_only"), "mutated": blocked.get("mutated")}, "request_id_header": bool(headers.get("x-request-id"))})
+            clean_blocked = _sanitize_dict_response({"status": blocked.get("status"), "read_only": blocked.get("read_only"), "mutated": blocked.get("mutated")})
+            endpoint_results.append({"endpoint": "/api/commerce-mvp/public-run", "status": "passed" if blocked.get("status") == "blocked" else "failed", "response": clean_blocked, "request_id_header": bool(headers.get("x-request-id"))})
         except (OSError, ValueError, urllib.error.URLError) as exc: endpoint_results.append({"endpoint": "/api/commerce-mvp/public-run", "status": "failed", "detail": type(exc).__name__})
         report["backend_endpoints"] = endpoint_results
         if any(item["status"] == "failed" for item in endpoint_results): report["status"] = "partial" if report["status"] != "failed" else report["status"]

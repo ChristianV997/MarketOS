@@ -13,6 +13,7 @@ def test_deployment_contract_is_machine_readable_and_classifies_secrets():
     assert variables["SUPABASE_SERVICE_ROLE_KEY"]["secret"] is True
     assert variables["SUPABASE_SERVICE_ROLE_KEY"]["browser_allowed"] is False
     assert "SHOPIFY_ACCESS_TOKEN" in contract["forbidden_frontend_secret_names"]
+    assert "SHOPIFY_ACCESS_TOKEN" in contract["forbidden_frontend_variable_names"]
 
 
 def test_selected_platform_templates_are_present_and_secret_free():
