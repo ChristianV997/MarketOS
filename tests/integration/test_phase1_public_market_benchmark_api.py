@@ -50,7 +50,10 @@ def artifacts_root(tmp_path: Path, monkeypatch) -> Path:
 
 @pytest.fixture
 def client(monkeypatch):
-    """The real backend app over HTTP, without lifespan (no runtime services), with the network tripwired."""
+    """The real backend app over HTTP, without lifespan (no runtime services), with the network tripwired.
+
+    The route is operator-only, so the client carries a synthetic verified operator through the identity overrides.
+    """
     from fastapi.testclient import TestClient
 
     from backend.api import app
@@ -61,9 +64,33 @@ def client(monkeypatch):
     monkeypatch.delenv(ENV, raising=False)
     monkeypatch.setattr(competition_evidence, "_validate_public_url", tripwire)
     monkeypatch.setattr(competition_evidence, "_bounded_get", tripwire)
+    for dependency, provider in _operator_overrides().items():
+        monkeypatch.setitem(app.dependency_overrides, dependency, provider)
     reset_rate_limits_for_tests()
-    yield TestClient(app)
+    yield TestClient(app, headers={"Authorization": "Bearer tok-operator"})
     reset_rate_limits_for_tests()
+
+
+def _operator_overrides() -> dict:
+    from backend.identity.errors import IdentityError
+    from backend.identity.http import get_token_verifier, get_workspace_repository
+    from backend.identity.principal import VerifiedPrincipal
+    from backend.identity.roles import INTERNAL_OPERATOR
+    from backend.identity.workspaces import WorkspaceAccess
+
+    issuer = "https://clerk.test"
+
+    class Verifier:
+        def verify(self, token):
+            if token != "tok-operator":
+                raise IdentityError()
+            return VerifiedPrincipal(issuer, "user_operator")
+
+    class Repository:
+        def memberships_for(self, principal):
+            return [WorkspaceAccess(issuer, principal.subject, "ws_phase1_synthetic", "internal", "synthetic", INTERNAL_OPERATOR)]
+
+    return {get_token_verifier: Verifier, get_workspace_repository: Repository}
 
 
 def _stored_report() -> dict:
@@ -165,10 +192,11 @@ def test_route_redacts_credential_shaped_keys_in_stored_artifacts(client, monkey
 
 
 def test_route_rate_limit_is_a_read_only_429_over_http(client, monkeypatch):
-    monkeypatch.setattr(route, "check_rate_limit", lambda *args, **kwargs: SimpleNamespace(allowed=False))
+    monkeypatch.setattr("api.routes.event_access.check_rate_limit", lambda *args, **kwargs: SimpleNamespace(allowed=False, retry_after_seconds=5))
     response = client.get(PATH)
     assert response.status_code == 429
-    assert response.json() == {"status": "rate_limited", "read_only": True, "mutated": False}
+    body = response.json()["detail"]
+    assert body["status"] == "rate_limited" and body["read_only"] is True and body["mutated"] is False
 
 
 SECRET_PATH_TOKEN = "sk-" + "SYNTHETICEXAMPLE0123456789"
@@ -225,4 +253,18 @@ def test_route_enforces_the_real_rate_limit_over_http(client, monkeypatch):
     assert [client.get(PATH).status_code for _ in range(2)] == [200, 200]
     limited = client.get(PATH)
     assert limited.status_code == 429
-    assert limited.json() == {"status": "rate_limited", "read_only": True, "mutated": False}
+    body = limited.json()["detail"]
+    assert body["status"] == "rate_limited" and body["read_only"] is True and body["mutated"] is False
+
+
+def test_public_market_route_refuses_anonymous_reads(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from backend.api import app
+
+    for dependency, provider in _operator_overrides().items():
+        monkeypatch.setitem(app.dependency_overrides, dependency, provider)
+    response = TestClient(app).get("/api/phase1/public-market-benchmark")
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": {"code": "missing_credentials"}}

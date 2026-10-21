@@ -1,6 +1,16 @@
 """Tests for the GET /api/events/opportunity-scoring read view — a thin
 event_type filter over the existing timeline, no second query engine."""
+from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
+
 from api.routes import canonical_events
+from backend.identity.roles import INTERNAL_OPERATOR
+from backend.identity.workspaces import WorkspaceAccess
+
+# Synthetic verified operator bound to the fixture workspace; the gate result is passed in because these tests call handlers directly.
+OPERATOR_ACCESS = WorkspaceAccess("https://clerk.test", "user_operator", "demo", "internal", "synthetic", INTERNAL_OPERATOR)
 
 
 def test_opportunity_scoring_route_filters_to_scoring_event_types(monkeypatch):
@@ -15,7 +25,7 @@ def test_opportunity_scoring_route_filters_to_scoring_event_types(monkeypatch):
         {"event_type": "shopify_product_observed", "payload_summary": {}},
     ]
     monkeypatch.setattr(canonical_events, "_report", lambda source, query: {"timeline": {"events": fake_events}})
-    result = canonical_events.opportunity_scoring(limit=100, offset=0, request=None)
+    result = canonical_events.opportunity_scoring(limit=100, offset=0, request=None, access=OPERATOR_ACCESS)
     types = {event["event_type"] for event in result["events"]}
     assert types == {"opportunity_scoring_started", "candidate_scored", "opportunity_ranked", "opportunity_scoring_completed"}
     assert len(result["events"]) == 5
@@ -26,11 +36,12 @@ def test_opportunity_scoring_route_respects_rate_limit(monkeypatch):
     from backend.security.rate_limit import RateLimitResult
 
     monkeypatch.setattr(
-        canonical_events, "check_rate_limit",
+        "api.routes.event_access.check_rate_limit",
         lambda policy, key: RateLimitResult(allowed=False, policy="event_read", limit=1, remaining=0, retry_after_seconds=5),
     )
-    response = canonical_events.opportunity_scoring(limit=100, offset=0, request=None)
-    assert response.status_code == 429
+    with pytest.raises(HTTPException) as refused:
+        canonical_events.admit_event_read(SimpleNamespace(client=SimpleNamespace(host="198.51.100.22")))
+    assert refused.value.status_code == 429
 
 
 def test_router_exposes_opportunity_scoring_get_route():
@@ -41,7 +52,7 @@ def test_router_exposes_opportunity_scoring_get_route():
 def test_opportunity_rankings_route_returns_decoded_summaries(monkeypatch):
     fake_rankings = [{"run_id": "commerce-mvp-run-1", "top_candidate_id": "c1", "scores": [{"candidate_id": "c1", "composite_score": 51.06}]}]
     monkeypatch.setattr(canonical_events, "_report", lambda source, query: {"opportunity_rankings": fake_rankings})
-    result = canonical_events.opportunity_rankings(limit=100, offset=0, request=None)
+    result = canonical_events.opportunity_rankings(limit=100, offset=0, request=None, access=OPERATOR_ACCESS)
     assert result["rankings"] == fake_rankings
     assert result["read_only"] is True
 
@@ -50,11 +61,12 @@ def test_opportunity_rankings_route_respects_rate_limit(monkeypatch):
     from backend.security.rate_limit import RateLimitResult
 
     monkeypatch.setattr(
-        canonical_events, "check_rate_limit",
+        "api.routes.event_access.check_rate_limit",
         lambda policy, key: RateLimitResult(allowed=False, policy="event_read", limit=1, remaining=0, retry_after_seconds=5),
     )
-    response = canonical_events.opportunity_rankings(limit=100, offset=0, request=None)
-    assert response.status_code == 429
+    with pytest.raises(HTTPException) as refused:
+        canonical_events.admit_event_read(SimpleNamespace(client=SimpleNamespace(host="198.51.100.22")))
+    assert refused.value.status_code == 429
 
 
 def test_router_exposes_opportunity_rankings_get_route():

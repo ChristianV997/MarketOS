@@ -2,7 +2,9 @@
 
 MarketOS can run one operator-controlled Commerce MVP packet from the public
 Google News RSS search feed. This is the first Phase 1 network behavior because
-it is a bounded, no-auth, GET-only observation path. It does not prove demand,
+it is a bounded, GET-only observation path that makes outbound requests. The
+server route that triggers it is operator-only (see below); the outbound fetch
+is the only network effect and does not require a caller credential. It does not prove demand,
 sales, profitability, ROAS, supplier viability, conversion, or launch
 readiness.
 
@@ -34,6 +36,12 @@ The server endpoint is `POST /api/commerce-mvp/public-run`. It requires
 `MARKETOS_EVENT_WRITE_JSONL_PATH` beneath `artifacts/`; Supabase staging uses
 the existing server-side credentials and explicit write gate. Browser requests
 cannot supply a URL, file path, credential, cookie, or session.
+
+The route is operator-only. It requires a verified operator principal with
+`canonical_event:write` (see [Canonical Event Read Views](CANONICAL_EVENT_READ_VIEWS.md#access-contract)).
+A body `workspace_id` that names another workspace is refused with 403 before
+any network call or write; an omitted one runs in the operator's bound workspace.
+Without a configured verifier and repository the route answers 503.
 
 The `/operator/events` page contains an acknowledgement-gated “Run public
 Commerce MVP test” form. It states the public GET-only behavior, requires a

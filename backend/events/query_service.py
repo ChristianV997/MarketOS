@@ -5,6 +5,7 @@ import os
 import re
 import stat
 from collections import Counter, defaultdict
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Sequence
 from backend.contracts.events import Event
@@ -106,6 +107,18 @@ def load_events_from_jsonl(
         try: events.append(Event.from_dict(json.loads(line)))
         except Exception: warnings.append(f"malformed_jsonl_row:{index}")
     return events, warnings
+
+class WorkspaceScopeError(ValueError):
+    """A query names a workspace other than the one the caller is bound to, or no bound workspace exists."""
+
+
+def bind_query_to_workspace(query: EventQuery, bound_workspace_id: str) -> EventQuery:
+    """Return ``query`` limited to the server-bound workspace. A different selector is refused, never widened."""
+    if not isinstance(bound_workspace_id, str) or not bound_workspace_id:
+        raise WorkspaceScopeError("no bound workspace")
+    if query.workspace_id not in (None, bound_workspace_id):
+        raise WorkspaceScopeError("query workspace is outside the bound workspace")
+    return replace(query, workspace_id=bound_workspace_id)
 
 def query_events(events: Sequence[Event], query: EventQuery) -> list[Event]:
     def matched(event: Event) -> bool:
@@ -209,4 +222,4 @@ def event_query_report(events: Sequence[Event], query: EventQuery, warnings: Seq
     timeline = build_event_timeline(events, query, warnings)
     return {"query": query.to_dict(), "timeline": timeline.to_dict(), "commerce_runs": [item.to_dict() for item in build_commerce_run_summaries(query_events(events, query))], "shopify_imports": [item.to_dict() for item in build_shopify_import_summaries(query_events(events, query))], "opportunity_rankings": [item.to_dict() for item in build_opportunity_ranking_summaries(query_events(events, query))], "competition_summaries": [item.to_dict() for item in build_competition_summaries(query_events(events, query))], "research_portfolios": [item.to_dict() for item in build_research_portfolio_summaries(query_events(events, query))], "read_only": True, "network_calls": False, "mutated": False}
 
-__all__ = ["build_commerce_run_summaries", "build_competition_summaries", "build_event_timeline", "build_opportunity_ranking_summaries", "build_research_portfolio_summaries", "build_shopify_import_summaries", "event_query_report", "load_events_from_jsonl", "query_events", "summarize_event_record"]
+__all__ = ["WorkspaceScopeError", "bind_query_to_workspace", "build_commerce_run_summaries", "build_competition_summaries", "build_event_timeline", "build_opportunity_ranking_summaries", "build_research_portfolio_summaries", "build_shopify_import_summaries", "event_query_report", "load_events_from_jsonl", "query_events", "summarize_event_record"]

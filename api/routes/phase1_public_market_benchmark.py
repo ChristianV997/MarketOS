@@ -4,10 +4,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Request
 
-from backend.security.rate_limit import check_rate_limit, event_read_policy
+from api.routes.event_access import admit_event_read, event_read_gate
 from evaluation.commerce.public_market_benchmark import (
     build_public_market_benchmark,
     load_public_market_seed,
@@ -16,7 +15,8 @@ from evaluation.commerce.public_market_benchmark import (
     to_marketplace_trend_report,
 )
 
-router = APIRouter(prefix="/api/phase1", tags=["phase1-public-market-benchmark"])
+# Derived from evaluation output: operator-only and throttled before identity (see api/routes/event_access.py).
+router = APIRouter(prefix="/api/phase1", tags=["phase1-public-market-benchmark"], dependencies=[Depends(admit_event_read), Depends(event_read_gate)])
 ROOT = Path(__file__).resolve().parents[2]
 ARTIFACTS = (ROOT / "artifacts").resolve()
 DEFAULT_SEED = ROOT / "tests" / "fixtures" / "public_market_benchmark" / "candidates.json"
@@ -56,10 +56,6 @@ def _with_canonical_projection(report: dict) -> dict:
 
 @router.get("/public-market-benchmark")
 def public_market_benchmark(request: Request = None):
-    key = getattr(getattr(request, "client", None), "host", None) or "direct"
-    decision = check_rate_limit(event_read_policy(), key)
-    if not decision.allowed:
-        return JSONResponse({"status": "rate_limited", "read_only": True, "mutated": False}, status_code=429)
     configured = _safe_path("MARKETOS_PHASE1_PUBLIC_MARKET_BENCHMARK_REPORT")
     if configured and configured.is_file():
         from evaluation.commerce.readiness import load_sanitized_artifact
