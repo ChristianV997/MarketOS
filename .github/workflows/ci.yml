@@ -251,7 +251,7 @@ jobs:
             --env STATE_PATH=/tmp/state.db \
             marketos:ci
 
-      - name: Verify health and dry commerce execution
+      - name: Verify health and commerce route fails closed
         run: |
           for attempt in {1..30}; do
             if curl --fail --silent --show-error http://127.0.0.1:3000/health \
@@ -266,20 +266,14 @@ jobs:
             sleep 2
           done
 
-          response=$(curl --fail --silent --show-error \
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --request POST http://127.0.0.1:3000/commerce/cycle \
             --header 'content-type: application/json' \
-            --data '{"signals":[{"id":"ci-signal","product_id":"ci-product","product":"CI Product","source":"ci","platform":"test","score":0.9,"engagement":0.8,"velocity":0.7,"quality":{"provenance":"live","attribution":"attributed"}}],"products":{"ci-product":{"product_id":"ci-product","name":"CI Product","selling_price":60,"quality":{"provenance":"live","attribution":"attributed"}}},"offers":{"ci-product":{"supplier_id":"ci-supplier","product_id":"ci-product","unit_cost":15,"shipping_cost":5,"inventory_units":100,"quality":{"provenance":"live","attribution":"attributed"}}},"top_k":1,"budget":10}')
-          RESPONSE="$response" python - <<'PY'
-          import json
-          import os
-
-          result = json.loads(os.environ["RESPONSE"])
-          assert result["dry_run"] is True, result
-          assert result["summary"]["launchable"] == 1, result
-          assert result["summary"]["feedback_records"] == 1, result
-          print("Container commerce smoke passed:", result.get("artifact_id", "unknown"))
-          PY
+            --data '{"top_k":1,"budget":10}')
+          # An image with no identity provider wired must refuse commerce execution (503), not run it anonymously.
+          # Authorized dry-run behavior is covered by tests/test_frontend_api_dry_run_smoke.py.
+          test "$status" = "503"
+          echo "Container commerce gate refused an anonymous caller with HTTP $status"
 
       - name: Print container logs on failure
         if: failure()

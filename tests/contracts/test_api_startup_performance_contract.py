@@ -128,6 +128,10 @@ _ASGI_RUNNER = r"""
 import asyncio, json, sys
 from unittest import mock
 import backend.api as api
+from backend.identity.operator_gates import runtime_control_gate
+from backend.identity.workspaces import WorkspaceAccess
+# /cycle is operator-only; this scenario checks lazy loading for an authorized caller.
+api.app.dependency_overrides[runtime_control_gate] = lambda: WorkspaceAccess("https://issuer.test", "synthetic-operator", "ws_synthetic", "internal", "synthetic", "internal_operator")
 
 def call(method, path):
     sent = []
