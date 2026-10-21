@@ -46,8 +46,10 @@ Route: `/operator/services` (read-only).
 
 1. Filter without re-ranking (source order preserved).
 2. Keyboard: ArrowUp/Down, Home/End, Enter/Space select; skip link to pipeline.
-3. Inspect intake, data-quality blockers, package/scope, evidence, assumptions, economics copies, acceptance criteria, draft report preview, client review/revision/approval/delivery/renewal/upsell callouts, export preview.
-4. Export is client-safe or rejected with the reason and missing fields. Internal prompts, formulas, heuristics, credentials, paths, raw HTML, and cross-client keys are omitted/rejected.
+3. Scan the pipeline table for additive `operator_review_cues`: evidence class/count, economics display-only labels, next-action owner, and short next human action. Cues are planning copies only and never authorize approve/spend/publish/fulfill/message.
+4. Open the selected engagement for intake, data-quality blockers, package/scope, evidence register, assumptions, economics copies, acceptance criteria, draft report preview, client review/revision/approval/delivery/renewal/upsell callouts, and export preview.
+5. If filters hide the previous selection, the status banner announces the fallback focus; no hidden row is invented.
+6. Export is client-safe or rejected with the reason and missing fields. Internal prompts, formulas, heuristics, credentials, paths, raw HTML, and cross-client keys are omitted/rejected.
 
 ## Tests and browser/E2E
 

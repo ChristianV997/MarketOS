@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-import { adaptServiceProjection, neverUpgradeEvidenceClass, normalizeEvidenceClass, normalizeLifecycle } from "../src/features/service-delivery-workbench/lib/adaptServiceProjection.ts";
+import {
+  adaptServiceProjection,
+  deriveOperatorReviewCues,
+  neverUpgradeEvidenceClass,
+  normalizeEvidenceClass,
+  normalizeLifecycle,
+} from "../src/features/service-delivery-workbench/lib/adaptServiceProjection.ts";
 import { composeWorkbenchViewModel, moveSelection } from "../src/features/service-delivery-workbench/lib/composeWorkbenchViewModel.ts";
 import { buildClientSafeServiceExport, EXPORT_OMIT_KEYS } from "../src/features/service-delivery-workbench/lib/exportClientSafeEngagement.ts";
 import { EMPTY_FILTERS, filterEngagements } from "../src/features/service-delivery-workbench/lib/filterEngagements.ts";
@@ -181,9 +187,15 @@ test("component sources expose required accessibility contracts", async () => {
   assert.match(table, /<table/);
   assert.match(table, /scope="col"/);
   assert.match(table, /ArrowDown/);
+  assert.match(table, /Evidence/);
+  assert.match(table, /Economics/);
+  assert.match(table, /Owner/);
+  assert.match(table, /Not live validated|not live validated/i);
   assert.match(chrome, /focus-visible:outline/);
   assert.match(workflow, /data_inadequate/);
   assert.match(workflow, /required_from_client/);
+  assert.match(workflow, /Operator review cues/);
+  assert.match(workflow, /never live validation|planning copies only/i);
   assert.match(page, /Service delivery workbench/);
   assert.match(page, /Skip to service pipeline/);
   assert.match(page, /not commercially validated/);
@@ -194,6 +206,126 @@ test("component sources expose required accessibility contracts", async () => {
   assert.match(workflow, /Draft report preview/);
   assert.match(sidebar, /\/operator\/services/);
   assert.match(main, /\/operator\/services/);
+});
+
+test("operator review cues expose evidence economics and owner without authority", () => {
+  const demo = buildDemoProjection();
+  const engagement = demo.engagements[0];
+  assert.equal(engagement.operator_review_cues.nba_executes_live_action, false);
+  assert.equal(engagement.operator_review_cues.economics_display_only, true);
+  assert.equal(engagement.operator_review_cues.economics_frontend_calculates, false);
+  assert.equal(engagement.operator_review_cues.evidence_not_live_validated, true);
+  assert.ok(engagement.operator_review_cues.evidence_count >= 0);
+  assert.match(engagement.operator_review_cues.review_note, /planning copies|never live validation/i);
+
+  const adapted = adaptServiceProjection({
+    report_version: "service-delivery-plane-v1",
+    engagements: [{
+      engagement_id: "eng-cue-1",
+      package_id: "product-validation-sprint",
+      lifecycle_state: "analysis",
+      workspace_id: "ws-1",
+      client_id: "c-1",
+      read_only: true,
+      network_calls: false,
+      mutated: false,
+      evidence_set: [{
+        evidence_id: "ev-1",
+        title: "Manual import",
+        evidence_class: "manual_import",
+        summary: "fixture copy",
+      }],
+      economics: {
+        authority: "backend_service_economics",
+        frontend_calculates: false,
+        fee: {
+          amount_label: "1200.00",
+          currency: "USD",
+          evidence_class: "assumption",
+          source: "backend_service_economics",
+          display_only: true,
+        },
+        contribution: null,
+        planning_assumption_note: "planning only",
+      },
+      next_best_action: {
+        action: "Review evidence classes before asking the client for more records.",
+        owner: "operator",
+        executes_live_action: false,
+        rationale: "read-only",
+      },
+      operator_review_cues: {
+        nba_owner: "operator",
+        nba_action_short: "Review evidence classes before asking the client for more records.",
+        nba_executes_live_action: true,
+        evidence_count: 1,
+        strongest_evidence_class: "live_validated",
+        weakest_evidence_class: "manual_import",
+        evidence_not_live_validated: false,
+        fee_evidence_class: "assumption",
+        contribution_evidence_class: "unavailable",
+        economics_display_only: false,
+        economics_frontend_calculates: true,
+        data_inadequate: false,
+        financial_ready: true,
+        review_note: "producer note",
+      },
+    }],
+  });
+  const cues = adapted.projection.engagements[0].operator_review_cues;
+  assert.equal(cues.nba_executes_live_action, false);
+  assert.equal(cues.economics_display_only, true);
+  assert.equal(cues.economics_frontend_calculates, false);
+  assert.equal(cues.evidence_not_live_validated, true);
+  assert.equal(cues.fee_evidence_class, "assumption");
+  assert.equal(cues.contribution_evidence_class, "unavailable");
+  assert.equal(cues.financial_ready, false);
+  assert.notEqual(cues.strongest_evidence_class, "live_validated");
+
+  const forged = deriveOperatorReviewCues({
+    evidence: [{ evidence_id: "e", title: "t", evidence_class: "fixture", summary: "", collected_at: null }],
+    economics: {
+      authority: "backend_service_economics",
+      frontend_calculates: false,
+      fee: null,
+      contribution: null,
+      contribution_unavailable_reason: "missing",
+      planning_assumption_note: "n",
+    },
+    next_best_action: {
+      action: "Wait",
+      owner: "blocked",
+      executes_live_action: false,
+      rationale: "r",
+    },
+    eligibility: { eligible: false, data_inadequate: false, reasons: [], required_from_client: [] },
+    financial_readiness: { ready: false, missing: [], note: "n" },
+    producerCues: { strongest_evidence_class: "live_validated", evidence_not_live_validated: false },
+  });
+  assert.equal(forged.strongest_evidence_class, "fixture");
+  assert.equal(forged.evidence_not_live_validated, true);
+});
+
+test("selection outside the current filter is announced without inventing rows", () => {
+  const demo = buildDemoProjection();
+  const hiddenId = demo.engagements.find((item) => item.lifecycle_state === "data_inadequate")?.engagement_id
+    ?? demo.engagements[0].engagement_id;
+  const view = composeWorkbenchViewModel({
+    isLoading: false,
+    errorMessage: null,
+    projection: demo,
+    filters: { ...EMPTY_FILTERS, lifecycle: "draft_ready" },
+    selectedId: hiddenId,
+  });
+  if (view.filtered.length === 0) {
+    assert.equal(view.surface, "empty");
+    return;
+  }
+  assert.equal(view.selectionOutsideFilter, true);
+  assert.match(view.statusMessage, /left the filter/i);
+  assert.ok(view.diagnostics.some((item) => /selection_outside_filter/.test(item)));
+  assert.ok(view.selected);
+  assert.notEqual(view.selected.engagement_id, hiddenId);
 });
 
 test("scale fixture exists for one hundred engagements", () => {

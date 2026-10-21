@@ -181,6 +181,37 @@ def test_projection_never_claims_a_mutation_or_live_action():
     assert row["next_best_action"]["executes_live_action"] is False
 
 
+def test_operator_review_cues_surface_evidence_economics_and_owner_without_authority():
+    _, _, _, _, row = _full_row(
+        "product-validation-sprint",
+        registry_path="/tmp/never-written-service-delivery-projection-test-cues.json",
+    )
+    cues = row["operator_review_cues"]
+    assert cues["nba_owner"] == "operator"
+    assert cues["nba_executes_live_action"] is False
+    assert cues["evidence_count"] >= 1
+    assert cues["strongest_evidence_class"] in {
+        "observed", "derived", "assumption", "supplier_claimed", "supplier_documented",
+        "fixture", "manual_import", "simulated", "unavailable", "live_validated",
+    }
+    assert cues["economics_display_only"] is True
+    assert cues["economics_frontend_calculates"] is False
+    assert cues["fee_evidence_class"] == "assumption"
+    assert cues["evidence_not_live_validated"] is True or cues["strongest_evidence_class"] == "live_validated"
+    assert "never live validation" in cues["review_note"].lower() or "planning copies" in cues["review_note"].lower()
+    assert "approve" in cues["review_note"].lower()
+
+    inadequate = _full_row(
+        "product-validation-sprint",
+        data_inadequate=True,
+        registry_path="/tmp/never-written-service-delivery-projection-test-cues-inadequate.json",
+    )[4]
+    assert inadequate["operator_review_cues"]["nba_owner"] == "client"
+    assert inadequate["operator_review_cues"]["data_inadequate"] is True
+    assert inadequate["operator_review_cues"]["financial_ready"] is False
+    assert inadequate["operator_review_cues"]["nba_executes_live_action"] is False
+
+
 # ---------------------------------------------------------------------------
 # Deterministic replay
 # ---------------------------------------------------------------------------
